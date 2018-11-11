@@ -1,5 +1,5 @@
 #include "vm/page.h"
-
+#include "threads/synch.h"
 /*
 Managing the frame table
 
@@ -21,11 +21,13 @@ kernel.
 
 
 struct frame {
-
+  void *base;
+  struct page *page;
+  struct lock lock;
 };
-static struct frame *try_frame_alloc_and_lock (struct page *page);
-static struct frame *frame_alloc_and_lock (struct page *page);
 void frame_init(void);
+
+struct frame *frame_alloc_and_lock(struct page *p);
 void frame_lock (struct page *p);
 void frame_free (struct frame *f);
 void frame_unlock (struct frame *f);

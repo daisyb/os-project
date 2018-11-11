@@ -4,7 +4,7 @@
 #define STACK_MAX (1024 * 1024)
 
 struct page {
-
+  struct frame *frame;
 };
 
 /* Destroys a page, which must be in the current process's
