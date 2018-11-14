@@ -429,7 +429,6 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
   ASSERT ((read_bytes + zero_bytes) % PGSIZE == 0);
   ASSERT (pg_ofs (upage) == 0);
   ASSERT (ofs % PGSIZE == 0);
-
   lock_acquire (&filesys_lock);
   file_seek (file, ofs);
   lock_release (&filesys_lock);
@@ -447,7 +446,6 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
         return false;
 
       
-
       /* Load this page. */
       lock_acquire (&filesys_lock);
       if (file_read (file, sp->frame->base, page_read_bytes) != (int) page_read_bytes)

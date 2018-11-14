@@ -1,9 +1,11 @@
 #include "vm/frame.h"
 #include <stdlib.h>
+#include <string.h>
 #include "threads/malloc.h"
 #include "threads/palloc.h"
 #include "threads/loader.h"
-#include <stdio.h>
+
+
 static struct frame *frames;
 static size_t frame_cnt;
 
@@ -59,8 +61,10 @@ static struct frame *try_frame_alloc_and_lock (struct page *page) {
   return frame;
 }
 
-/* Tries really hard to allocate and lock a frame for PAGE.
-   Returns the frame if successful, false on failure. */
+/* 
+   Tries really hard to allocate and lock a frame for PAGE.
+   Returns the frame if successful, false on failure. 
+*/
 struct frame *frame_alloc_and_lock (struct page *page) {
   struct frame *frame = try_frame_alloc_and_lock(page);
   if (frame == NULL) {
@@ -70,6 +74,10 @@ struct frame *frame_alloc_and_lock (struct page *page) {
   return frame;
 }
 
+/* Fills physical frame with zeros */
+void frame_fill_zeros(struct frame *f){
+  memset(f->base, 0, PGSIZE);
+}
 /* Locks P's frame into memory, if it has one.
    Upon return, p->frame will not change until P is unlocked. */
 void frame_lock (struct page *p) {

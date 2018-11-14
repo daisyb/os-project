@@ -117,10 +117,8 @@ struct page *add_to_page_table (uint8_t *upage, bool writable){
     free (sp);
     return NULL;
   }
-  if (!(hash_insert (&(thread_current ()->spt), &sp->elem) == NULL)){
-    free(sp);
-    return NULL;
-  }
+  
+  hash_insert (&(thread_current ()->spt), &sp->elem);
   return sp;
 }
 
