@@ -1,7 +1,7 @@
-#include <stdbool.h>
-#include <debug.h>
+//#include <stdbool.h>
+//#include <stdlib.h>
+//#include <debug.h>
 #include "lib/kernel/hash.h"
-#include <stdbool.h>
 #include "threads/malloc.h"
 #include "threads/palloc.h"
 #include <string.h>
@@ -50,7 +50,7 @@ struct page *get_sp (void *vaddr);
 bool load_page (struct page *sp);
 bool load_swap (struct page *sp);
 bool load_file (struct page *sp);
-bool add_file_to_page_table (struct file *file, int32_t ofs, uint8_t *upage, uint32_t read_bytes, uint32_t zero_bytes, bool writable);
+struct page *add_to_page_table (uint8_t *upage, bool writable);
 
 /* Destroys a page, which must be in the current process's
    page table.  Used as a callback for hash_destroy(). */

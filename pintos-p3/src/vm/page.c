@@ -1,5 +1,22 @@
 #include "vm/frame.h"
 
+/* Adds a mapping from user virtual address UPAGE to kernel
+   virtual address KPAGE to the page table.
+   If WRITABLE is true, the user process may modify the page;
+   otherwise, it is read-only.
+   UPAGE must not already be mapped.
+   KPAGE should probably be a page obtained from theuser pool
+   with palloc_get_page().
+   Returns true on success, false if UPAGE is already mapped or
+   if memory allocation fails. */
+static bool install_page (void *upage, void *kpage, bool writable){
+  struct thread *t = thread_current ();
+  /* Verify that ther's not already a page at that virtual
+     address, then map our page there. */
+  return (pagedir_get_page (t->pagedir, upage) == NULL
+	  && pagedir_set_page (t->pagedir, upage, kpage, writable));
+}
+
 unsigned page_hash (const struct hash_elem *e, void *aux UNUSED){
   const struct page *sp = hash_entry (e, struct page, elem);
   unsigned result = hash_bytes (&sp->vaddr, sizeof (sp->vaddr));
@@ -61,13 +78,9 @@ bool load_page (struct page *sp){
   //swap_in (sp->swap_index, sp->vaddr);
   sp->is_loaded = true;
   return true;
-}*/
+  }*/
 
 /*bool load_file (struct page *sp){
-  struct frame *frame = frame_alloc_and_lock (sp);
-  if (!frame){
-    return false;
-  }
   if (sp->read_bytes > 0){
     lock_acquire (&filesys_lock);
     if ((int) sp->read_bytes != file_read_at (sp->file, frame, sp->read_bytes, sp->offset)){
@@ -84,23 +97,31 @@ bool load_page (struct page *sp){
   }
   sp->is_loaded = true;
   return true;
-}*/
+  }*/
 
-bool add_file_to_page_table (struct file *file, int32_t ofs, uint8_t *upage, uint32_t read_bytes, uint32_t zero_bytes, bool writable){
+struct page *add_to_page_table (uint8_t *upage, bool writable){
   struct page *sp = malloc (sizeof (struct page));
-  if (!sp){
-    return false;
-  }
-  sp->file = file;
-  sp->offset = ofs;
+  if (!sp)
+    return NULL;
   sp->vaddr = upage;
-  sp->read_bytes = read_bytes;
-  sp->zero_bytes = zero_bytes;
-  sp->writable = writable;
-  sp->is_loaded = false;
-  sp->type = FILE;
-  sp->busy = false;
-  return (hash_insert (&(thread_current()->spt), &sp->elem) == NULL);
+
+  struct frame *frame = frame_alloc_and_lock (sp);
+  if (!frame){
+    free (sp);
+    return NULL;
+  }
+  sp->frame = frame;
+
+  if (!install_page (upage, frame->base, writable)){
+    frame_free (frame);
+    free (sp);
+    return NULL;
+  }
+  if (!(hash_insert (&(thread_current ()->spt), &sp->elem) == NULL)){
+    free(sp);
+    return NULL;
+  }
+  return sp;
 }
 
 /* static void destroy_page (struct hash_elem *p_, void *aux UNUSED)  {}
