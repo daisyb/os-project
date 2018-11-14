@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include "filesys/file.h"
 #include "synch.h"
+#include "lib/kernel/hash.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -129,6 +130,8 @@ struct thread
     struct list children;               /* List of child processes */
     struct process *process;            /* Shared data btwn process and parent, freed by parent */
     struct list fd_list;		/* List of file descriptors. */
+
+    struct hash spt; 		/* Supplemental page table */
 
     
 #ifdef USERPROG
