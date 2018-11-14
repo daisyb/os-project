@@ -1,23 +1,36 @@
 #include <stdbool.h>
 #include <debug.h>
 #include "lib/kernel/hash.h"
+#include <stdbool.h>
+#include "threads/malloc.h"
+#include "threads/palloc.h"
+#include <string.h>
+#include "userprog/pagedir.h"
+#include "userprog/process.h"
+#include "threads/synch.h"
+#include "threads/vaddr.h"
+#include "threads/thread.h"
+#include "userprog/syscall.h"
+#include "threads/interrupt.h"
+#include "filesys/file.h"
 
 #define FILE 0
 #define SWAP 1
 #define STACK_MAX (1024 * 1024)
 
-struct supp_page {
-  uint8_t type;
+struct page {
   void *vaddr;
+  struct frame *frame;
+  uint8_t type;
   bool writable;
-  //bool is_loaded;
+  bool is_loaded;
   bool busy;
 
   /* Data only relevant to files */
   struct file *file;
   size_t offset;
   size_t read_bytes;
-  //size_t zero_bytes;
+  size_t zero_bytes;
 
   /* Data only relevant to swaps */
   size_t swap_index;
@@ -33,10 +46,10 @@ bool page_less (const struct hash_elem *a_, const struct hash_elem *b_, void *au
 
 void spt_init (struct hash *spt);
 void spt_destroy (struct hash *spt);
-struct supp_page *get_sp (void *vaddr);
-bool load_page (struct supp_page *sp);
-bool load_swap (struct supp_page *sp);
-bool load_file (struct supp_page *sp);
+struct page *get_sp (void *vaddr);
+bool load_page (struct page *sp);
+bool load_swap (struct page *sp);
+bool load_file (struct page *sp);
 bool add_file_to_page_table (struct file *file, int32_t ofs, uint8_t *upage, uint32_t read_bytes, uint32_t zero_bytes, bool writable);
 
 /* Destroys a page, which must be in the current process's
