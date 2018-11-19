@@ -191,7 +191,6 @@ thread_create (const char *name, int priority,
   struct process *p = malloc(sizeof(struct process));
   init_process(p, tid);
   t->process = p;
-  list_init(&t->process->fd_list);
   spt_init(&t->spt);
 
   /* Stack frame for kernel_thread(). */
@@ -475,12 +474,12 @@ init_thread (struct thread *t, const char *name, int priority)
   memset (t, 0, sizeof *t);
   t->status = THREAD_BLOCKED;
   t->is_processs = false;
+  t->user_esp = NULL;
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
   t->magic = THREAD_MAGIC;
   list_init(&t->children);
-  list_init(&t->fd_list);
   
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
@@ -642,6 +641,7 @@ init_process(struct process *p, pid_t pid){
   p->loaded = false;
   sema_init(&p->sema_exit, 0);
   sema_init(&p->sema_load, 0);
+  list_init(&p->fd_list);
 }
 
 /* Adds the process corresponding to tid to the current threads children list */

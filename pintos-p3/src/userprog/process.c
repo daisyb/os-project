@@ -458,10 +458,13 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       lock_release (&filesys_lock);
       memset (sp->frame->base + page_read_bytes, 0, page_zero_bytes);
 
-      sp->file = file;
-      sp->offset = ofs;
-      sp->read_bytes = page_read_bytes;
-      sp->zero_bytes = page_zero_bytes;
+      if (page_read_bytes > 0)
+        {
+          sp->file = file;
+          sp->offset = ofs;
+          sp->read_bytes = page_read_bytes;
+          sp->zero_bytes = page_zero_bytes;
+        }
 
       /* Advance. */
       read_bytes -= page_read_bytes;

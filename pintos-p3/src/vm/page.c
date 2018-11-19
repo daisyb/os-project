@@ -1,5 +1,5 @@
 #include "vm/frame.h"
-
+#include <stdio.h>
 /* Adds a mapping from user virtual address UPAGE to kernel
    virtual address KPAGE to the page table.
    If WRITABLE is true, the user process may modify the page;
@@ -117,7 +117,7 @@ struct page *add_to_page_table (uint8_t *upage, bool writable){
     free (sp);
     return NULL;
   }
-  
+
   hash_insert (&(thread_current ()->spt), &sp->elem);
   return sp;
 }

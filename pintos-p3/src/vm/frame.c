@@ -38,26 +38,28 @@ frame_init ()
    it. Linear search for now.
  */
 static struct frame *find_free_frame(){
-  struct frame *frame = NULL;
-  lock_acquire(&scan_lock);
   unsigned i;
   for(i = 0; i < frame_cnt; i++){
     if (frames[i].page == NULL){
-      frame = &frames[i];
-      break;
+      return &frames[i];
     }
   }
-  lock_release(&scan_lock);
-  return frame;
+  return NULL;
 }
 
 /* Tries to allocate and lock a frame for PAGE.
    Returns the frame if successful, false on failure. */
 static struct frame *try_frame_alloc_and_lock (struct page *page) {
+  lock_acquire(&scan_lock);
   struct frame *frame = find_free_frame();
-  if (frame == NULL) return NULL;
+  if (frame == NULL) {
+    lock_release(&scan_lock);
+    return NULL;
+  }
   frame->page = page;
+  lock_release(&scan_lock);
   lock_acquire(&frame->lock);
+  memset(frame->base, 0, PGSIZE);
   return frame;
 }
 
@@ -74,10 +76,6 @@ struct frame *frame_alloc_and_lock (struct page *page) {
   return frame;
 }
 
-/* Fills physical frame with zeros */
-void frame_fill_zeros(struct frame *f){
-  memset(f->base, 0, PGSIZE);
-}
 /* Locks P's frame into memory, if it has one.
    Upon return, p->frame will not change until P is unlocked. */
 void frame_lock (struct page *p) {

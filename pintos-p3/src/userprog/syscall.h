@@ -5,23 +5,23 @@
 #include "process.h"
 #include <list.h>
 
-/* Note for Raphael: create, remove */
-
-/* Process identifier. */
 void syscall_init (void);
-int sys_write (int handle, void *usrc_, unsigned size);
-int sys_create (const char *file, unsigned initial_size);
-int sys_open (const char *file);
+int sys_write (int, void *, unsigned, void *);
+int sys_create (const char *, unsigned, void *);
+int sys_open (const char *, void *);
 void sys_exit (int status);
 void sys_halt (void) NO_RETURN;
-pid_t sys_exec (const char *file);
+pid_t sys_exec (const char *, void *);
 int sys_wait (pid_t);
 int get_handle (void);
 void sys_close (int handle);
-int sys_remove (const char *file);
+int sys_remove (const char *, void *);
 int sys_filesize (int handle);
-int sys_read (int handle, void *buffer, unsigned size);
+int sys_read (int handle, uint8_t *buffer, unsigned size, void *);
 unsigned tell (int handle);
 void seek (int handle, unsigned position);
 
+/* Stack */
+bool is_stack_access(void *vaddr, void *);
+bool try_grow_stack(void *uaddr, void *);
 #endif /* userprog/syscall.h */
