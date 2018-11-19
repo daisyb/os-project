@@ -6,7 +6,7 @@
 #include <list.h>
 
 void syscall_init (void);
-int sys_write (int, void *, unsigned, void *);
+int sys_write (int, void *, unsigned);
 int sys_create (const char *, unsigned, void *);
 int sys_open (const char *, void *);
 void sys_exit (int status);

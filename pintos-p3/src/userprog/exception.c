@@ -152,7 +152,7 @@ page_fault (struct intr_frame *f)
     if (try_grow_stack(fault_addr, f->esp)) return;
     sys_exit(-1);
   } else {
-    if (try_grow_stack(fault_addr, thread_current()->user_esp)) return;
+    try_grow_stack(fault_addr, thread_current()->user_esp);
     f->eip = (void (*) (void)) f->eax;
     f->eax = 0;
     return;

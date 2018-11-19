@@ -160,7 +160,7 @@ void syscall_init (void){
 
 
 /* Write system call */
-int sys_write (int handle, void *usrc_, unsigned size, void *esp){
+int sys_write (int handle, void *usrc_, unsigned size){
   is_valid_pointer(usrc_);
   char *usrc = usrc_;
   int bytes; 
@@ -342,17 +342,17 @@ static void is_valid_pointer (const void *p){
 
 bool is_stack_access(void *vaddr, void *esp){
   return 
-    is_user_vaddr(vaddr) && 
-    (vaddr >= esp || 
-     (vaddr + PUSH_BYTES) == esp || 
-     (vaddr + PUSHA_BYTES) == esp);
+    is_user_vaddr(vaddr) &&
+      (vaddr >= esp || 
+       (vaddr + PUSH_BYTES) == esp || 
+       (vaddr + PUSHA_BYTES) == esp);
 }
 
 /* 
    Grows stack if necessary. Returns true if stack was grown and false otherwise
  */
 bool try_grow_stack(void *uaddr, void *esp){
-  if (!is_stack_access(uaddr, esp)|| (PHYS_BASE - esp) > MAX_STACK_SZ)
+  if (!is_stack_access(uaddr, esp)|| uaddr < (void *)(PHYS_BASE - MAX_STACK_SZ))
     return false;
   return add_to_page_table(pg_round_down(uaddr), true) != NULL;
   
