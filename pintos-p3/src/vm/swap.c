@@ -58,6 +58,9 @@ swap_init (void)
 bool
 swap_in (struct page *p)
 {
+  ASSERT(p->frame != NULL);
+  ASSERT(lock_held_by_current_thread(p->frame->lock));
+  block_read()
     // might want to use these functions:
     // - lock_held_by_current_thread()
     // - block_read()
@@ -69,10 +72,15 @@ swap_in (struct page *p)
 bool 
 swap_out (struct page *p) 
 {
-  
-  // might want to use these functions:
-  // - lock_held_by_current_thread()
-  // - bitmap_scan_and_flip()
-  // - block_write()
+  ASSERT(p->frame != NULL);
+  ASSERT(lock_held_by_current_thread(p->frame->lock));
+  lock_acquire(&swap_lock);
+  block_sector_t sector = bitmap_scan_and_flip(swap_bitmap, 0, 1, 1);
+  if (sector == BITMAP_ERROR){
+    lock_release(&swap_lock);
+    return false;
+  }
+  block_write(swap_device, sector, p->frame->base);
+  lock_release(&swap_lock);
   return true;
 }
