@@ -60,8 +60,9 @@ bool
 swap_in (struct page *p)
 {
   ASSERT(p->frame != NULL);
-  ASSERT(lock_held_by_current_thread(&p->frame->lock));
+  ASSERT(frame_lock_held_by_current_thread(p));
   lock_acquire(&swap_lock);
+  if (!bitmap_test(swap_bitmap, p->swap_index)) return false; //sector empty
   block_read(swap_device, p->swap_index, p->frame->base);
   bitmap_reset(swap_bitmap, p->swap_index);
   lock_release(&swap_lock);
@@ -73,12 +74,12 @@ bool
 swap_out (struct page *p) 
 {
   ASSERT(p->frame != NULL);
-  ASSERT(lock_held_by_current_thread(&p->frame->lock));
+  ASSERT(frame_lock_held_by_current_thread(p));
   lock_acquire(&swap_lock);
   block_sector_t sector = bitmap_scan_and_flip(swap_bitmap, 0, 1, false);
   if (sector == BITMAP_ERROR){
     lock_release(&swap_lock);
-    return false;
+    PANIC("Swap space is full");
   }
   block_write(swap_device, sector, p->frame->base);
   p->swap_index = sector;

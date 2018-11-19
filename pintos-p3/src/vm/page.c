@@ -1,4 +1,4 @@
-#include "vm/frame.h"
+#include "vm/swap.h"
 #include <stdio.h>
 /* Adds a mapping from user virtual address UPAGE to kernel
    virtual address KPAGE to the page table.
@@ -15,6 +15,13 @@ static bool install_page (void *upage, void *kpage, bool writable){
      address, then map our page there. */
   return (pagedir_get_page (t->pagedir, upage) == NULL
 	  && pagedir_set_page (t->pagedir, upage, kpage, writable));
+}
+
+/*
+ removes UPAGE from page table
+*/
+static void uninstall_page(void *upage){
+  pagedir_clear_page(thread_current()->pagedir, upage);
 }
 
 unsigned page_hash (const struct hash_elem *e, void *aux UNUSED){
@@ -120,6 +127,43 @@ struct page *add_to_page_table (uint8_t *upage, bool writable){
 
   hash_insert (&(thread_current ()->spt), &sp->elem);
   return sp;
+}
+
+/* Locks a frame for page P and pages it in.
+   Returns true if successful, false on failure. */
+static bool do_page_in (struct page *p){
+  struct frame *f = frame_alloc_and_lock(p);
+  if (!f) return false;
+  p->frame = f;
+  if (!swap_in(p)) return false;
+  if (!install_page(p->vaddr, p->frame->base, p->writable))
+    return false;
+  return true;
+}
+
+/* Evicts page P.
+   P must have a locked frame.
+   Return true if successful, false on failure. */
+bool page_out (struct page *p){
+  ASSERT(frame_lock_held_by_current_thread(p));
+  int success = swap_out(p);
+  frame_free(p->frame);
+  p->frame = NULL;
+  uninstall_page(p->vaddr);
+  return success;
+}
+
+/* Faults in the page containing FAULT_ADDR.
+   Returns true if successful, false on failure. */
+bool page_in (void *fault_addr){
+  struct page *p = get_sp(fault_addr);
+  return p && do_page_in(p);
+}
+
+
+bool page_accessed_recently (struct page *p) {
+  ASSERT(frame_lock_held_by_current_thread(p));
+  return pagedir_is_accessed(thread_current()->pagedir, p->vaddr);
 }
 
 /* static void destroy_page (struct hash_elem *p_, void *aux UNUSED)  {}

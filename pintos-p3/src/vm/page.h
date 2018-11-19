@@ -51,6 +51,9 @@ bool load_page (struct page *sp);
 bool load_swap (struct page *sp);
 bool load_file (struct page *sp);
 struct page *add_to_page_table (uint8_t *upage, bool writable);
+bool page_in(void *fault_addr);
+bool page_out(struct page *p);
+bool page_accessed_recently (struct page *p);
 
 /* Destroys a page, which must be in the current process's
    page table.  Used as a callback for hash_destroy(). */
@@ -59,28 +62,14 @@ struct page *add_to_page_table (uint8_t *upage, bool writable);
 /* Destroys the current process's page table. */
 //void page_exit (void);
 
-/* Returns the page containing the given virtual ADDRESS,
-   or a null pointer if no such page exists.
-   Allocates stack pages as necessary. */
-//static struct page *page_for_addr (const void *address);
-
-/* Locks a frame for page P and pages it in.
-   Returns true if successful, false on failure. */
-//static bool do_page_in (struct page *p);
-
-/* Faults in the page containing FAULT_ADDR.
-   Returns true if successful, false on failure. */
-//bool page_in (void *fault_addr);
-
-/* Evicts page P.
-   P must have a locked frame.
-   Return true if successful, false on failure. */
-//bool page_out (struct page *p);
+/* Evicts the page containing address VADDR
+   and removes it from the page table. */
+//void page_deallocate (void *vaddr){
 
 /* Returns true if page P's data has been accessed recently,
    false otherwise.
    P must have a frame locked into memory. */
-//bool page_accessed_recently (struct page *p);
+
 
 /* Adds a mapping for user virtual address VADDR to the page hash
    table.  Fails if VADDR is already mapped or if memory

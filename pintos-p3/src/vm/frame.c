@@ -1,10 +1,11 @@
 #include "vm/frame.h"
 #include <stdlib.h>
 #include <string.h>
+#include <random.h>
+#include <stdio.h>
 #include "threads/malloc.h"
 #include "threads/palloc.h"
 #include "threads/loader.h"
-
 
 static struct frame *frames;
 static size_t frame_cnt;
@@ -13,6 +14,7 @@ static struct lock scan_lock;
 static size_t hand;
 
 static struct frame *find_free_frame(void);
+static struct frame *evict_frame(void);
 
 void
 frame_init ()
@@ -47,6 +49,18 @@ static struct frame *find_free_frame(){
   return NULL;
 }
 
+/*
+Chooses a frame to evict and then evicts it
+*/
+static struct frame *evict_frame(){
+  int frame_idx = random_ulong() % frame_cnt;
+  lock_acquire(&scan_lock);
+  struct frame *f = &frames[frame_idx];
+  lock_release(&scan_lock);
+  if (!page_out(f->page)) return NULL;
+  return f;
+}
+
 /* Tries to allocate and lock a frame for PAGE.
    Returns the frame if successful, false on failure. */
 static struct frame *try_frame_alloc_and_lock (struct page *page) {
@@ -69,9 +83,8 @@ static struct frame *try_frame_alloc_and_lock (struct page *page) {
 */
 struct frame *frame_alloc_and_lock (struct page *page) {
   struct frame *frame = try_frame_alloc_and_lock(page);
-  if (frame == NULL) {
-    //perform swap before giving up
-    return NULL;
+  if (frame == NULL){
+    frame = evict_frame();
   }
   return frame;
 }
@@ -99,3 +112,6 @@ void frame_unlock (struct frame *f) {
   lock_release(&f->lock);
 }
 
+bool frame_lock_held_by_current_thread(struct page *p){
+  return lock_held_by_current_thread(&p->frame->lock);
+}
