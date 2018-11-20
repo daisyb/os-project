@@ -57,6 +57,7 @@ static struct frame *evict_frame(){
   lock_acquire(&scan_lock);
   struct frame *f = &frames[frame_idx];
   lock_release(&scan_lock);
+  lock_acquire(&f->lock);
   if (!page_out(f->page)) return NULL;
   return f;
 }
@@ -91,9 +92,8 @@ struct frame *frame_alloc_and_lock (struct page *page) {
 
 /* Locks P's frame into memory, if it has one.
    Upon return, p->frame will not change until P is unlocked. */
-void frame_lock (struct page *p) {
-  if (p->frame)
-    lock_acquire(&p->frame->lock);
+void frame_lock (struct frame *f) {
+  lock_acquire(&f->lock);
 }
 
 /* Releases frame F for use by another page.

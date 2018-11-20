@@ -16,6 +16,8 @@
 
 #define FILE 0
 #define SWAP 1
+#define MEMORY 2
+
 #define STACK_MAX (1024 * 1024)
 
 struct page {
@@ -50,11 +52,14 @@ struct page *get_sp (void *vaddr);
 bool load_page (struct page *sp);
 bool load_swap (struct page *sp);
 bool load_file (struct page *sp);
-struct page *add_to_page_table (uint8_t *upage, bool writable);
+bool load_memory(struct page *sp);
+//struct page *add_to_page_tablee (uint8_t *upage, bool writable, int type);
+struct page *add_to_page_table (uint8_t *upage, bool writable, int type);
 bool page_in(void *fault_addr);
 bool page_out(struct page *p);
 bool page_accessed_recently (struct page *p);
-
+bool page_lock (void *addr);
+void page_unlock (void *addr);
 /* Destroys a page, which must be in the current process's
    page table.  Used as a callback for hash_destroy(). */
 //static void destroy_page (struct hash_elem *p_, void *aux UNUSED);

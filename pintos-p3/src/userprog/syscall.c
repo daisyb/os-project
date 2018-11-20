@@ -354,6 +354,6 @@ bool is_stack_access(void *vaddr, void *esp){
 bool try_grow_stack(void *uaddr, void *esp){
   if (!is_stack_access(uaddr, esp)|| uaddr < (void *)(PHYS_BASE - MAX_STACK_SZ))
     return false;
-  return add_to_page_table(pg_round_down(uaddr), true) != NULL;
+  return add_to_page_table(pg_round_down(uaddr), true, MEMORY) != NULL;
   
 }

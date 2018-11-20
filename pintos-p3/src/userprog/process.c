@@ -441,34 +441,20 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
       /* Get a page of memory. */
-      struct page *sp = add_to_page_table (upage, writable);
+      struct page *sp = add_to_page_table (upage, writable, FILE);
       if (sp == NULL)
         return false;
 
       
-      /* Load this page. */
-      lock_acquire (&filesys_lock);
-      if (file_read (file, sp->frame->base, page_read_bytes) != (int) page_read_bytes)
-        {
-          lock_release (&filesys_lock);
-	  /* NEED TO REPLACE THIS */
-          //palloc_free_page (kpage);
-          return false; 
-        }
-      lock_release (&filesys_lock);
-      memset (sp->frame->base + page_read_bytes, 0, page_zero_bytes);
-
-      if (page_read_bytes > 0)
-        {
-          sp->file = file;
-          sp->offset = ofs;
-          sp->read_bytes = page_read_bytes;
-          sp->zero_bytes = page_zero_bytes;
-        }
-
+      sp->file = file;
+      sp->offset = ofs;
+      sp->read_bytes = page_read_bytes;
+      sp->zero_bytes = page_zero_bytes;
+      
       /* Advance. */
       read_bytes -= page_read_bytes;
       zero_bytes -= page_zero_bytes;
+      ofs += page_read_bytes;
       upage += PGSIZE;
     }
   return true;
@@ -543,7 +529,7 @@ static bool
 setup_stack (void **esp, char *cmdline)
 {
   uint8_t *upage = ((uint8_t *) PHYS_BASE) - PGSIZE;
-  struct page *stack_page = add_to_page_table (upage, true);
+  struct page *stack_page = add_to_page_table (upage, true, MEMORY);
   if (!stack_page)
     return false;
   *esp = PHYS_BASE;

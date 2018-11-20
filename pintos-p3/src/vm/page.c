@@ -59,86 +59,78 @@ struct page *get_sp (void *vaddr){
 bool load_page (struct page *sp){
   bool success = false;
   sp->busy = true;
-  if (sp->is_loaded){
-    return success;
-  }
   switch (sp->type){
-    /*case FILE:
+    case FILE:
     success = load_file (sp);
-    break;*/
-    /*case SWAP:
+    break;
+    case SWAP:
     success = load_swap (sp);
-    break;*/
+    if (success) sp->type = MEMORY;
+    break;
+  case MEMORY:
+    success = load_memory(sp);
   }
+  frame_unlock(sp->frame);
   return success;
 }
 
-/*bool load_swap (struct page *sp){
+bool load_swap (struct page *sp){
   struct frame *frame = frame_alloc_and_lock (sp);
   if (!frame){
     return false;
   }
-  if (!install_page (sp->vaddr, frame, sp->writable)){
+  if (!install_page (sp->vaddr, frame->base, sp->writable)){
     frame_free (frame);
     return false;
   }
-  //swap_in (sp->swap_index, sp->vaddr);
-  sp->is_loaded = true;
-  return true;
-  }*/
+  sp->frame = frame;
+  return swap_in (sp);
+}
 
-/*bool load_file (struct page *sp){
+bool load_memory(struct page *sp){
+  struct frame *frame = frame_alloc_and_lock (sp);
+  if (!frame){
+    return false;
+  }
+  if (!install_page (sp->vaddr, frame->base, sp->writable)){
+    frame_free (frame);
+    return false;
+  }
+  sp->frame = frame;
+  return true;
+}
+bool load_file (struct page *sp){
+  struct frame *frame = frame_alloc_and_lock (sp);
+  if (!frame)
+    return false;
+  sp->frame = frame;
   if (sp->read_bytes > 0){
     lock_acquire (&filesys_lock);
-    if ((int) sp->read_bytes != file_read_at (sp->file, frame, sp->read_bytes, sp->offset)){
+    if ((int) sp->read_bytes != file_read_at (sp->file, frame->base, sp->read_bytes, sp->offset)){
       lock_release (&filesys_lock);
       frame_free (frame);
       return false;
     }
     lock_release (&filesys_lock);
-    memset (frame + sp->read_bytes, 0, sp->zero_bytes);
   }
-  if (!install_page (sp->vaddr, frame, sp->writable)){
+  memset (frame->base + sp->read_bytes, 0, sp->zero_bytes);
+  if (!install_page (sp->vaddr, frame->base, sp->writable)){
     frame_free (frame);
     return false;
   }
-  sp->is_loaded = true;
   return true;
-  }*/
+}
 
-struct page *add_to_page_table (uint8_t *upage, bool writable){
+struct page *add_to_page_table (uint8_t *upage, bool writable, int type){
   struct page *sp = malloc (sizeof (struct page));
   if (!sp)
     return NULL;
   sp->vaddr = upage;
-
-  struct frame *frame = frame_alloc_and_lock (sp);
-  if (!frame){
-    free (sp);
-    return NULL;
-  }
-  sp->frame = frame;
-
-  if (!install_page (upage, frame->base, writable)){
-    frame_free (frame);
-    free (sp);
-    return NULL;
-  }
-
+  sp->type = type;
+  sp->writable = writable;
   hash_insert (&(thread_current ()->spt), &sp->elem);
+  if (type == MEMORY) load_page(sp);
   return sp;
-}
-
-/* Locks a frame for page P and pages it in.
-   Returns true if successful, false on failure. */
-static bool do_page_in (struct page *p){
-  struct frame *f = frame_alloc_and_lock(p);
-  if (!f) return false;
-  p->frame = f;
-  if (!swap_in(p)) return false;
-  if (!install_page(p->vaddr, p->frame->base, p->writable))
-    return false;
-  return true;
 }
 
 /* Evicts page P.
@@ -146,7 +138,12 @@ static bool do_page_in (struct page *p){
    Return true if successful, false on failure. */
 bool page_out (struct page *p){
   ASSERT(frame_lock_held_by_current_thread(p));
-  int success = swap_out(p);
+  int success = false;
+  // if file was never changed don't put in swap space
+  if (p->type != FILE || page_accessed_recently(p)){
+    success = swap_out(p);
+    p->type = SWAP;
+  }
   frame_free(p->frame);
   p->frame = NULL;
   uninstall_page(p->vaddr);
@@ -157,13 +154,24 @@ bool page_out (struct page *p){
    Returns true if successful, false on failure. */
 bool page_in (void *fault_addr){
   struct page *p = get_sp(fault_addr);
-  return p && do_page_in(p);
+  return p && load_page(p);
 }
 
 
 bool page_accessed_recently (struct page *p) {
   ASSERT(frame_lock_held_by_current_thread(p));
   return pagedir_is_accessed(thread_current()->pagedir, p->vaddr);
+}
+
+bool page_lock (void *addr){
+  struct page *p = get_sp(addr);
+  if (!p) return false;
+  frame_lock(p->frame);
+  return true;
+}
+void page_unlock (void *addr) {
+  struct page *p = get_sp(addr);
+  frame_unlock(p->frame);
 }
 
 /* static void destroy_page (struct hash_elem *p_, void *aux UNUSED)  {}
