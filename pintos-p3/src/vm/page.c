@@ -70,7 +70,6 @@ bool load_page (struct page *sp){
   case MEMORY:
     success = load_memory(sp);
   }
-  frame_unlock(sp->frame);
   return success;
 }
 
@@ -137,10 +136,10 @@ struct page *add_to_page_table (uint8_t *upage, bool writable, int type){
    P must have a locked frame.
    Return true if successful, false on failure. */
 bool page_out (struct page *p){
-  ASSERT(frame_lock_held_by_current_thread(p));
+  //ASSERT(frame_lock_held_by_current_thread(p));
   int success = false;
   // if file was never changed don't put in swap space
-  if (p->type != FILE || page_accessed_recently(p)){
+  if (p->type != FILE || pagedir_is_dirty(thread_current()->pagedir, p->vaddr)){
     success = swap_out(p);
     p->type = SWAP;
   }
@@ -150,7 +149,7 @@ bool page_out (struct page *p){
   return success;
 }
 
-/* Faults in the page containing FAULT_ADDR.
+/* Trys to add page containing FAULT_ADDR to memory.
    Returns true if successful, false on failure. */
 bool page_in (void *fault_addr){
   struct page *p = get_sp(fault_addr);
@@ -159,10 +158,13 @@ bool page_in (void *fault_addr){
 
 
 bool page_accessed_recently (struct page *p) {
-  ASSERT(frame_lock_held_by_current_thread(p));
   return pagedir_is_accessed(thread_current()->pagedir, p->vaddr);
 }
 
+void page_clear_accessed(struct page *p){
+  pagedir_set_accessed(thread_current()->pagedir, p->vaddr, false);
+}
+  
 bool page_lock (void *addr){
   struct page *p = get_sp(addr);
   if (!p) return false;

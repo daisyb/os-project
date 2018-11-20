@@ -14,7 +14,7 @@ static struct lock scan_lock;
 static size_t hand;
 
 static struct frame *find_free_frame(void);
-static struct frame *evict_frame(void);
+static struct frame *evict_frame(struct frame *);
 
 void
 frame_init ()
@@ -34,33 +34,48 @@ frame_init ()
       f->base = base;
       f->page = NULL;
     }
+  hand = 0;
 }
 
 /* Finds a frame in frames that is not yet tied to a page and returns
    it. Linear search for now.
  */
 static struct frame *find_free_frame(){
-  unsigned i;
-  for(i = 0; i < frame_cnt; i++){
-    if (frames[i].page == NULL){
-      return &frames[i];
+  struct frame *f = NULL;
+  while (!f){    
+    struct frame *cur_f = &frames[hand++];
+    if (cur_f->page == NULL){
+      f = cur_f;
+    } else if (page_accessed_recently(cur_f->page)){
+      page_clear_accessed(cur_f->page);
+    } else {
+      f = evict_frame(cur_f);
     }
+    if (hand >= frame_cnt) hand = 0;    
   }
-  return NULL;
+  return f;
 }
 
 /*
 Chooses a frame to evict and then evicts it
 */
-static struct frame *evict_frame(){
-  int frame_idx = random_ulong() % frame_cnt;
-  lock_acquire(&scan_lock);
-  struct frame *f = &frames[frame_idx];
-  lock_release(&scan_lock);
-  lock_acquire(&f->lock);
+/* static struct frame *evict_frame(){ */
+/*   int frame_idx = random_ulong() % frame_cnt; */
+/*   lock_acquire(&scan_lock); */
+/*   struct frame *f = &frames[frame_idx]; */
+/*   lock_release(&scan_lock); */
+/*   frame_lock(f); */
+/*   if (!page_out(f->page)) return NULL; */
+/*   return f; */
+/* } */
+static struct frame *evict_frame(struct frame *f){
+  ASSERT(f->page != NULL);
+  frame_lock(f);
   if (!page_out(f->page)) return NULL;
   return f;
 }
+
+
 
 /* Tries to allocate and lock a frame for PAGE.
    Returns the frame if successful, false on failure. */
@@ -73,7 +88,7 @@ static struct frame *try_frame_alloc_and_lock (struct page *page) {
   }
   frame->page = page;
   lock_release(&scan_lock);
-  lock_acquire(&frame->lock);
+  frame_lock(frame);
   memset(frame->base, 0, PGSIZE);
   return frame;
 }
@@ -84,32 +99,29 @@ static struct frame *try_frame_alloc_and_lock (struct page *page) {
 */
 struct frame *frame_alloc_and_lock (struct page *page) {
   struct frame *frame = try_frame_alloc_and_lock(page);
-  if (frame == NULL){
-    frame = evict_frame();
-  }
   return frame;
 }
 
 /* Locks P's frame into memory, if it has one.
    Upon return, p->frame will not change until P is unlocked. */
 void frame_lock (struct frame *f) {
-  lock_acquire(&f->lock);
+  //lock_acquire(&f->lock);
 }
 
 /* Releases frame F for use by another page.
    F must be locked for use by the current process.
    Any data in F is lost. */
 void frame_free (struct frame *f) {
-  ASSERT(lock_held_by_current_thread(&f->lock));
+  /* ASSERT(lock_held_by_current_thread(&f->lock)); */
   f->page = NULL;
-  lock_release(&f->lock);
+  /* lock_release(&f->lock); */
 }
 
 /* Unlocks frame F, allowing it to be evicted.
    F must be locked for use by the current process. */
 void frame_unlock (struct frame *f) {
-  ASSERT(lock_held_by_current_thread(&f->lock));
-  lock_release(&f->lock);
+  /* ASSERT(lock_held_by_current_thread(&f->lock)); */
+  /* lock_release(&f->lock); */
 }
 
 bool frame_lock_held_by_current_thread(struct page *p){

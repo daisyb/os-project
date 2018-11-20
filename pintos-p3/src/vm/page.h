@@ -58,6 +58,7 @@ struct page *add_to_page_table (uint8_t *upage, bool writable, int type);
 bool page_in(void *fault_addr);
 bool page_out(struct page *p);
 bool page_accessed_recently (struct page *p);
+void page_clear_accessed(struct page *p);
 bool page_lock (void *addr);
 void page_unlock (void *addr);
 /* Destroys a page, which must be in the current process's

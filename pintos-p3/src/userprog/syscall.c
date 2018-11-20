@@ -45,7 +45,9 @@ static void write_out(void *udst_, void *ksrc_, size_t size, void *esp){
   uint8_t *ksrc = ksrc_;
   for (; size > 0; size--, udst++, ksrc++){
     while(udst >= (uint8_t *) PHYS_BASE || !put_user (udst, *ksrc)){
-      if (!try_grow_stack(udst, esp)) sys_exit(-1);
+      if (!page_in(udst) && !try_grow_stack(udst, esp)){
+        sys_exit(-1);
+      }
     }
   }
 }
@@ -54,7 +56,7 @@ static void write_stdin(void *udst_, size_t size, void *esp){
   uint8_t *udst = udst_;
   for (; size > 0; size--, udst++){
     while (udst >= (uint8_t *) PHYS_BASE || !put_user (udst, input_getc())){
-      if (!try_grow_stack(udst, esp)) sys_exit(-1);
+      if (!page_in(udst) && !try_grow_stack(udst, esp)) sys_exit(-1);
     }
   }
 }
@@ -66,7 +68,7 @@ static void copy_in (void *dst_, const void *usrc_, size_t size, void *esp){
   uint8_t *usrc = (uint8_t *)usrc_;
   for (; size > 0; size--, dst++, usrc++){
     while(usrc >= (uint8_t *) PHYS_BASE || !get_user (dst, usrc)){
-      if (!try_grow_stack(usrc, esp)) sys_exit(-1);
+      if (!page_in(usrc) && !try_grow_stack(usrc, esp)) sys_exit(-1);
     }
   }
 }
@@ -84,7 +86,7 @@ static char *copy_in_string (const char *us_, void *esp){
     while(us+i >= (const char *) PHYS_BASE || 
           !get_user ((uint8_t *)ks+i, (uint8_t *)us+i))
       {
-        if (!try_grow_stack(us+i, esp)){
+        if (!page_in(us+1) && !try_grow_stack(us+i, esp)){
           palloc_free_page(ks);
           sys_exit(-1);
         }
