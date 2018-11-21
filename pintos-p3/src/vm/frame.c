@@ -22,11 +22,9 @@ frame_init ()
   void *base;
 
   lock_init (&scan_lock);
-
   frames = malloc (sizeof *frames * init_ram_pages);
   if (frames == NULL)
     PANIC ("out of memory allocating page frames");
-
   while ((base = palloc_get_page (PAL_USER)) != NULL)
     {
       struct frame *f = &frames[frame_cnt++];
@@ -35,6 +33,8 @@ frame_init ()
       f->page = NULL;
     }
   hand = 0;
+  //printf("frame: %d\n", frame_cnt);
+  //printf("num frames %d\n", (1024*1024 + 1024*427)/PGSIZE);
 }
 
 /* Finds a frame in frames that is not yet tied to a page and returns
@@ -43,15 +43,19 @@ frame_init ()
 static struct frame *find_free_frame(){
   struct frame *f = NULL;
   while (!f){    
-    struct frame *cur_f = &frames[hand++];
+    struct frame *cur_f = &frames[hand];
     if (cur_f->page == NULL){
       f = cur_f;
     } else if (page_accessed_recently(cur_f->page)){
       page_clear_accessed(cur_f->page);
     } else {
-      f = evict_frame(cur_f);
+      f = evict_frame(cur_f);      
     }
-    if (hand >= frame_cnt) hand = 0;    
+    hand++;
+    if (hand >= frame_cnt){
+      hand = 0;
+      //printf("reset\n");
+    }
   }
   return f;
 }
@@ -59,17 +63,9 @@ static struct frame *find_free_frame(){
 /*
 Chooses a frame to evict and then evicts it
 */
-/* static struct frame *evict_frame(){ */
-/*   int frame_idx = random_ulong() % frame_cnt; */
-/*   lock_acquire(&scan_lock); */
-/*   struct frame *f = &frames[frame_idx]; */
-/*   lock_release(&scan_lock); */
-/*   frame_lock(f); */
-/*   if (!page_out(f->page)) return NULL; */
-/*   return f; */
-/* } */
 static struct frame *evict_frame(struct frame *f){
   ASSERT(f->page != NULL);
+  //printf("evicted pg: %x data: %x hand:%d type: %d dirty: %d\n", f->page->vaddr, (*(int *)f->base), hand, f->page->type == FILE, pagedir_is_dirty(thread_current()->pagedir, f->page->vaddr));
   frame_lock(f);
   if (!page_out(f->page)) return NULL;
   return f;
@@ -89,7 +85,6 @@ static struct frame *try_frame_alloc_and_lock (struct page *page) {
   frame->page = page;
   lock_release(&scan_lock);
   frame_lock(frame);
-  memset(frame->base, 0, PGSIZE);
   return frame;
 }
 

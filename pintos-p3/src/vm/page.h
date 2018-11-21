@@ -27,6 +27,7 @@ struct page {
   bool writable;
   bool is_loaded;
   bool busy;
+  
 
   /* Data only relevant to files */
   struct file *file;
@@ -61,6 +62,7 @@ bool page_accessed_recently (struct page *p);
 void page_clear_accessed(struct page *p);
 bool page_lock (void *addr);
 void page_unlock (void *addr);
+void *page_physaddr(struct page *p);
 /* Destroys a page, which must be in the current process's
    page table.  Used as a callback for hash_destroy(). */
 //static void destroy_page (struct hash_elem *p_, void *aux UNUSED);

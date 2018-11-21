@@ -41,7 +41,6 @@ process_execute (const char *cmdline)
   if (fn_copy == NULL)
     return TID_ERROR;
   strlcpy (fn_copy, cmdline, PGSIZE);
-
   char cmd_cpy[strlen(cmdline) + 1];
   strlcpy(cmd_cpy, cmdline, strlen(cmdline) + 1);
   char *args;
@@ -126,6 +125,7 @@ process_exit (void)
          directory before destroying the process's page
          directory, or our active page directory will be one
          that's been freed (and cleared). */
+      spt_destroy(&cur->spt);
       cur->pagedir = NULL;
       pagedir_activate (NULL);
       pagedir_destroy (pd);
@@ -534,7 +534,7 @@ setup_stack (void **esp, char *cmdline)
     return false;
   *esp = PHYS_BASE;
   if (strlen(cmdline) + 1 > PGSIZE) return NULL;
-  *esp = setup_args(upage, stack_page->frame->base, cmdline);
+  *esp = setup_args(upage, page_physaddr(stack_page), cmdline);
   return true;
 }
 

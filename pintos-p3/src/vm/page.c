@@ -41,14 +41,28 @@ void spt_init (struct hash *spt){
   hash_init (spt, page_hash, page_less, NULL);
 }
 
-/*void spt_destroy (struct hash *spt){
-  hash_destroy (spt, page_action);
-}*/
+static void deallocate_page(struct page *p){
+  if (p->type == SWAP) swap_free_slot(p->swap_index);
+  if (p->frame) frame_free(p->frame);
+  free(p);
+}
+/* Destroys a page, which must be in the current process's
+   page table.  Used as a callback for hash_destroy(). */
+static void destroy_page (struct hash_elem *p_, void *aux UNUSED)
+{
+  struct page *sp = hash_entry (p_, struct page, elem);
+  deallocate_page(sp);
+}
+
+/* Destroys the current process's supp page table. */
+void spt_destroy (struct hash *spt){
+  hash_destroy(spt, destroy_page);
+}
 
 struct page *get_sp (void *vaddr){
   struct page sp;
   sp.vaddr = pg_round_down (vaddr);
-
+  
   struct hash_elem *e = hash_find (&(thread_current()->spt), &sp.elem);
   if (!e){
     return NULL;
@@ -74,16 +88,21 @@ bool load_page (struct page *sp){
 }
 
 bool load_swap (struct page *sp){
-  struct frame *frame = frame_alloc_and_lock (sp);
+  struct frame *frame = frame_alloc_and_lock(sp);
   if (!frame){
     return false;
   }
   if (!install_page (sp->vaddr, frame->base, sp->writable)){
     frame_free (frame);
+    sp->frame = NULL;
     return false;
   }
   sp->frame = frame;
-  return swap_in (sp);
+  if (!swap_in (sp)){
+    deallocate_page(sp); // if page wasn't on swap space just ditch it
+    return false;
+  }
+  return true;
 }
 
 bool load_memory(struct page *sp){
@@ -102,7 +121,6 @@ bool load_file (struct page *sp){
   struct frame *frame = frame_alloc_and_lock (sp);
   if (!frame)
     return false;
-  sp->frame = frame;
   if (sp->read_bytes > 0){
     lock_acquire (&filesys_lock);
     if ((int) sp->read_bytes != file_read_at (sp->file, frame->base, sp->read_bytes, sp->offset)){
@@ -117,16 +135,20 @@ bool load_file (struct page *sp){
     frame_free (frame);
     return false;
   }
+  sp->frame = frame;
   return true;
 }
 
 struct page *add_to_page_table (uint8_t *upage, bool writable, int type){
-  struct page *sp = malloc (sizeof (struct page));
+  struct page *sp;
+  if((sp = get_sp(upage))) return sp;
+  sp = malloc (sizeof (struct page));
   if (!sp)
     return NULL;
-  sp->vaddr = upage;
+  sp->vaddr = pg_round_down(upage);
   sp->type = type;
   sp->writable = writable;
+  sp->frame = NULL;
   hash_insert (&(thread_current ()->spt), &sp->elem);
   if (type == MEMORY) load_page(sp);
   return sp;
@@ -137,6 +159,7 @@ struct page *add_to_page_table (uint8_t *upage, bool writable, int type){
    Return true if successful, false on failure. */
 bool page_out (struct page *p){
   //ASSERT(frame_lock_held_by_current_thread(p));
+  //printf("in pagedir before: %d file: %d\n", pagedir_get_page(thread_current()->pagedir, p->vaddr) != NULL, p->type == FILE);
   int success = false;
   // if file was never changed don't put in swap space
   if (p->type != FILE || pagedir_is_dirty(thread_current()->pagedir, p->vaddr)){
@@ -146,6 +169,7 @@ bool page_out (struct page *p){
   frame_free(p->frame);
   p->frame = NULL;
   uninstall_page(p->vaddr);
+  //printf("in pagedir after: %d\n", pagedir_get_page(thread_current()->pagedir, p->vaddr) != NULL);
   return success;
 }
 
@@ -153,6 +177,7 @@ bool page_out (struct page *p){
    Returns true if successful, false on failure. */
 bool page_in (void *fault_addr){
   struct page *p = get_sp(fault_addr);
+  //if (!p) printf("%x\n", fault_addr);
   return p && load_page(p);
 }
 
@@ -176,6 +201,10 @@ void page_unlock (void *addr) {
   frame_unlock(p->frame);
 }
 
+void *page_physaddr(struct page *p){
+  if(!p || !p->frame) return NULL;
+  return p->frame->base;
+}
 /* static void destroy_page (struct hash_elem *p_, void *aux UNUSED)  {}
 void page_exit (void)  {}
 static struct page *page_for_addr (const void *address) {

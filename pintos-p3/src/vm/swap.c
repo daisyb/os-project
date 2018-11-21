@@ -52,8 +52,12 @@ swap_init (void)
   if (swap_bitmap == NULL)
     PANIC ("couldn't create swap bitmap");
   lock_init (&swap_lock);
+  //printf("swap %d\n", block_size(swap_device) / PAGE_SECTORS);
 }
 
+void swap_free_slot(size_t swap_index){
+  bitmap_reset(swap_bitmap, swap_index);
+}
 /* Swaps in page P, which must have a locked frame
    (and be swapped out). */
 bool
@@ -62,10 +66,11 @@ swap_in (struct page *p)
   ASSERT(p->frame != NULL);
   //ASSERT(frame_lock_held_by_current_thread(p));
   lock_acquire(&swap_lock);
-  if (!bitmap_test(swap_bitmap, p->swap_index)) return false; //sector empty
-  block_read(swap_device, p->swap_index, p->frame->base);
-  bitmap_reset(swap_bitmap, p->swap_index);
+  if (!bitmap_test(swap_bitmap, p->swap_index)) return false; //slot empty
+  block_read(swap_device, p->swap_index, page_physaddr(p));
+  swap_free_slot(p->swap_index);
   lock_release(&swap_lock);
+  //printf("swap in pg: %x data: %x\n",p->vaddr, (*(int *)page_physaddr(p)));
   return true;
 }
 
@@ -81,8 +86,9 @@ swap_out (struct page *p)
     lock_release(&swap_lock);
     PANIC("Swap space is full");
   }
-  block_write(swap_device, sector, p->frame->base);
+  block_write(swap_device, sector, page_physaddr(p));
   p->swap_index = sector;
   lock_release(&swap_lock);
+ 
   return true;
 }
