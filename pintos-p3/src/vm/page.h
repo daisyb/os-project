@@ -25,6 +25,7 @@ struct page {
   struct frame *frame;
   uint8_t type;
   bool writable;
+  uint32_t *pagedir;
   bool is_loaded;
   bool busy;
   

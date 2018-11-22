@@ -63,7 +63,6 @@ Chooses a frame to evict and then evicts it
 static struct frame *evict_frame(struct frame *f){
   ASSERT(f->page != NULL);
   frame_lock(f);
-  ASSERT(lock_held_by_current_thread(&f->lock));
   if (!page_out(f->page)) return NULL;
   return f;
 }
