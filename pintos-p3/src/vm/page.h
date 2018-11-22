@@ -60,6 +60,7 @@ bool page_in(void *fault_addr);
 bool page_out(struct page *p);
 bool page_accessed_recently (struct page *p);
 void page_clear_accessed(struct page *p);
+bool page_is_dirty(struct page *p);
 bool page_lock (void *addr);
 void page_unlock (void *addr);
 void *page_physaddr(struct page *p);

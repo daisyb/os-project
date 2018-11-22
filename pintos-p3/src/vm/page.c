@@ -43,7 +43,11 @@ void spt_init (struct hash *spt){
 
 static void deallocate_page(struct page *p){
   if (p->type == SWAP) swap_free_slot(p->swap_index);
-  if (p->frame) frame_free(p->frame);
+  if (p->frame){
+    frame_lock(p->frame);
+    frame_free(p->frame);
+  }
+  uninstall_page(p);
   free(p);
 }
 /* Destroys a page, which must be in the current process's
@@ -84,6 +88,14 @@ bool load_page (struct page *sp){
   case MEMORY:
     success = load_memory(sp);
   }
+  if (success){
+    if (!install_page (sp, sp->writable)){
+      frame_free (sp->frame);
+      sp->frame = NULL;
+      return false;
+    }
+  }
+  frame_unlock(sp->frame);
   return success;
 }
 
@@ -158,18 +170,17 @@ struct page *add_to_page_table (uint8_t *upage, bool writable, int type){
    P must have a locked frame.
    Return true if successful, false on failure. */
 bool page_out (struct page *p){
-  //ASSERT(frame_lock_held_by_current_thread(p));
-  //printf("in pagedir before: %d file: %d\n", pagedir_get_page(thread_current()->pagedir, p->vaddr) != NULL, p->type == FILE);
-  int success = false;
-  // if file was never changed don't put in swap space
-  if (p->type != FILE || pagedir_is_dirty(thread_current()->pagedir, p->vaddr)){
+  ASSERT(frame_lock_held_by_current_thread(p));
+  int success = true;
+  // if (page_is_dirty(p)){
     success = swap_out(p);
     p->type = SWAP;
-  }
+    //}
+  uninstall_page(p);
   frame_free(p->frame);
+  p->frame->page = NULL;
   p->frame = NULL;
   uninstall_page(p->vaddr);
-  //printf("in pagedir after: %d\n", pagedir_get_page(thread_current()->pagedir, p->vaddr) != NULL);
   return success;
 }
 
@@ -177,10 +188,8 @@ bool page_out (struct page *p){
    Returns true if successful, false on failure. */
 bool page_in (void *fault_addr){
   struct page *p = get_sp(fault_addr);
-  //if (!p) printf("%x\n", fault_addr);
   return p && load_page(p);
 }
-
 
 bool page_accessed_recently (struct page *p) {
   return pagedir_is_accessed(thread_current()->pagedir, p->vaddr);
@@ -189,10 +198,14 @@ bool page_accessed_recently (struct page *p) {
 void page_clear_accessed(struct page *p){
   pagedir_set_accessed(thread_current()->pagedir, p->vaddr, false);
 }
-  
+
+bool page_is_dirty(struct page *p){
+  return pagedir_is_dirty(p->pagedir, p->vaddr);
+}  
+
 bool page_lock (void *addr){
   struct page *p = get_sp(addr);
-  if (!p) return false;
+  if (!p || !p->frame) return false;
   frame_lock(p->frame);
   return true;
 }

@@ -33,8 +33,6 @@ frame_init ()
       f->page = NULL;
     }
   hand = 0;
-  //printf("frame: %d\n", frame_cnt);
-  //printf("num frames %d\n", (1024*1024 + 1024*427)/PGSIZE);
 }
 
 /* Finds a frame in frames that is not yet tied to a page and returns
@@ -42,19 +40,18 @@ frame_init ()
  */
 static struct frame *find_free_frame(){
   struct frame *f = NULL;
-  while (!f){    
+  while (!f){
     struct frame *cur_f = &frames[hand];
     if (cur_f->page == NULL){
       f = cur_f;
     } else if (page_accessed_recently(cur_f->page)){
       page_clear_accessed(cur_f->page);
     } else {
-      f = evict_frame(cur_f);      
+      f = evict_frame(cur_f);
     }
     hand++;
     if (hand >= frame_cnt){
       hand = 0;
-      //printf("reset\n");
     }
   }
   return f;
@@ -65,8 +62,8 @@ Chooses a frame to evict and then evicts it
 */
 static struct frame *evict_frame(struct frame *f){
   ASSERT(f->page != NULL);
-  //printf("evicted pg: %x data: %x hand:%d type: %d dirty: %d\n", f->page->vaddr, (*(int *)f->base), hand, f->page->type == FILE, pagedir_is_dirty(thread_current()->pagedir, f->page->vaddr));
   frame_lock(f);
+  ASSERT(lock_held_by_current_thread(&f->lock));
   if (!page_out(f->page)) return NULL;
   return f;
 }
@@ -82,9 +79,9 @@ static struct frame *try_frame_alloc_and_lock (struct page *page) {
     lock_release(&scan_lock);
     return NULL;
   }
+  frame_lock(frame);
   frame->page = page;
   lock_release(&scan_lock);
-  frame_lock(frame);
   return frame;
 }
 
@@ -100,25 +97,26 @@ struct frame *frame_alloc_and_lock (struct page *page) {
 /* Locks P's frame into memory, if it has one.
    Upon return, p->frame will not change until P is unlocked. */
 void frame_lock (struct frame *f) {
-  //lock_acquire(&f->lock);
+  lock_acquire(&f->lock);
 }
 
 /* Releases frame F for use by another page.
    F must be locked for use by the current process.
    Any data in F is lost. */
 void frame_free (struct frame *f) {
-  /* ASSERT(lock_held_by_current_thread(&f->lock)); */
+  ASSERT(lock_held_by_current_thread(&f->lock));
   f->page = NULL;
-  /* lock_release(&f->lock); */
+  lock_release(&f->lock);
 }
 
 /* Unlocks frame F, allowing it to be evicted.
    F must be locked for use by the current process. */
 void frame_unlock (struct frame *f) {
-  /* ASSERT(lock_held_by_current_thread(&f->lock)); */
-  /* lock_release(&f->lock); */
+  ASSERT(lock_held_by_current_thread(&f->lock));
+  lock_release(&f->lock);
 }
 
 bool frame_lock_held_by_current_thread(struct page *p){
+  if(!p || !p->frame) return false;
   return lock_held_by_current_thread(&p->frame->lock);
 }

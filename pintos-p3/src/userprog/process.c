@@ -130,7 +130,9 @@ process_exit (void)
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
+  lock_acquire(&filesys_lock);
   file_close(cur->process->executable);
+  lock_release(&filesys_lock);
   process_close_files();
   /* Wakes up waiting parent */
   if (cur->process) sema_up(&cur->process->sema_exit);
@@ -439,13 +441,12 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
          and zero the final PAGE_ZERO_BYTES bytes. */
       size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
       size_t page_zero_bytes = PGSIZE - page_read_bytes;
-
+      
       /* Get a page of memory. */
       struct page *sp = add_to_page_table (upage, writable, FILE);
       if (sp == NULL)
         return false;
 
-      
       sp->file = file;
       sp->offset = ofs;
       sp->read_bytes = page_read_bytes;
@@ -534,7 +535,9 @@ setup_stack (void **esp, char *cmdline)
     return false;
   *esp = PHYS_BASE;
   if (strlen(cmdline) + 1 > PGSIZE) return NULL;
+  page_lock(upage);
   *esp = setup_args(upage, page_physaddr(stack_page), cmdline);
+  page_unlock(upage);
   return true;
 }
 
