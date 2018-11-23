@@ -44,17 +44,17 @@ static inline bool put_user (uint8_t *udst, uint8_t byte){
 static void write_out(void *udst_, void *ksrc_, size_t size, void *esp){
   uint8_t *udst = udst_;
   uint8_t *ksrc = ksrc_;
-  int locked = page_lock(udst);
+  //int locked = page_lock(udst);
   for (; size > 0; size--, udst++, ksrc++){
     while(udst >= (uint8_t *) PHYS_BASE || !put_user (udst, *ksrc)){
-      if (locked) page_unlock(udst);
+      //if (locked) page_unlock(udst);
       if (!page_in(udst) && !try_grow_stack(udst, esp)){
         sys_exit(-1);
       }
-      locked = page_lock(udst);
+      //locked = page_lock(udst);
     }
   }
-  if (locked) page_unlock(udst);
+  //if (locked) page_unlock(udst);
 }
 
 static void write_stdin(void *udst_, size_t size, void *esp){
@@ -89,7 +89,7 @@ static void copy_in (void *dst_, const void *usrc_, size_t size, void *esp){
   }
 }
 
-UNUSED static char *copy_in_string (const char *us_, void *esp UNUSED){
+static char *copy_in_string (const char *us_, void *esp){
   char *ks;
   int i;
   char *us = (char *)us_;
@@ -188,23 +188,23 @@ void syscall_init (void){
 int sys_write (int handle, void *usrc_, unsigned size){
   is_valid_pointer (usrc_, NULL);
   char *usrc = usrc_;
-  page_lock(usrc);
+  //page_lock(usrc);
   int bytes; 
   if (handle == STDOUT_FILENO){
     putbuf (usrc, size);
-    page_unlock(usrc);
+    //page_unlock(usrc);
     return size;
   }
   lock_acquire (&filesys_lock);
   struct file_descriptor *fd = lookup_fd(handle);
   if (!fd) {
     lock_release (&filesys_lock);
-    page_unlock(usrc);
+    //page_unlock(usrc);
     sys_exit (-1);
   }
   bytes = file_write (fd->file, usrc, size);
   lock_release (&filesys_lock);
-  page_unlock(usrc);
+  //page_unlock(usrc);
   return bytes;
 }
 
