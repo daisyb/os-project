@@ -12,13 +12,13 @@
 #include "pagedir.h"
 #include <stdbool.h>
 #include "devices/input.h"
-#include "vm/page.h"
+#include "vm/frame.h"
 
 #define PUSH_BYTES 4
 #define PUSHA_BYTES 32
 #define MAX_STACK_SZ 8000000 //8 MB
 
-static void is_valid_pointer (const void *p);
+static void is_valid_pointer (const void *vaddr, void *esp UNUSED);
 
 /* Copies a byte from user address USRC to kernel address DST. USRC must
    be below PHYS_BASE. Returns true if successful, false if a segfault occurred. */
@@ -71,7 +71,7 @@ static void copy_in (void *dst_, const void *usrc_, size_t size, void *esp){
   }
 }
 
-static char *copy_in_string (const char *us_, void *esp){
+UNUSED static char *copy_in_string (const char *us_, void *esp UNUSED){
   char *ks;
   int i;
   char *us = (char *)us_;
@@ -93,10 +93,18 @@ static char *copy_in_string (const char *us_, void *esp){
       return ks;
     }
   }
-
   return ks;
 }
 
+static void get_args (struct intr_frame *f, int *args, int argc){
+  int i;
+  int *vaddr;
+  for (i=0; i<argc; i++){
+    vaddr = (int *) f->esp + 1 + i;
+    is_valid_pointer ((const void *) vaddr, f->esp);
+    args[i] = *vaddr;
+  }
+}
 
 typedef int (*handler_function)(int, int, int, int);
 
@@ -118,10 +126,11 @@ struct handler_entry handlers[] = {
   {SYS_REMOVE, 1, (handler_function)sys_remove},
   {SYS_FILESIZE, 1, (handler_function)sys_filesize},
   {SYS_READ, 3, (handler_function)sys_read},
-  {SYS_SEEK, 2, (handler_function)seek},
-  {SYS_TELL, 1, (handler_function)tell}
+  {SYS_SEEK, 2, (handler_function)sys_seek},
+  {SYS_TELL, 1, (handler_function)sys_tell},
+  {SYS_MMAP, 2, (handler_function)sys_mmap},
+  {SYS_MUNMAP, 1, (handler_function)sys_munmap}
 };
-
 
 #define num_handlers (sizeof(handlers) / sizeof(struct handler_entry))
 
@@ -148,8 +157,7 @@ static void syscall_handler (struct intr_frame *f){
   // from user space to kernel space
   int args[4]; //fourth arg is reserved for esp
   memset (args, 0, sizeof *args);
-
-  copy_in (args, (uint32_t *) f->esp + 1, sizeof *args * syscall.argc, f->esp);
+  get_args (f, args, syscall.argc);
   args[syscall.argc] = (int)f->esp;
   f->eax = syscall.func(args[0], args[1], args[2], args[3]);
 }
@@ -158,10 +166,9 @@ void syscall_init (void){
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
 }
 
-
 /* Write system call */
 int sys_write (int handle, void *usrc_, unsigned size){
-  is_valid_pointer(usrc_);
+  is_valid_pointer (usrc_, NULL);
   char *usrc = usrc_;
   int bytes; 
   if (handle == STDOUT_FILENO){
@@ -198,11 +205,11 @@ void sys_halt (void){
 
 /* Exec system call */
 pid_t sys_exec (const char *file_, void *esp){
-  char *file = copy_in_string(file_, esp);
-  pid_t pid = process_execute(file);
-  struct process *child = thread_get_child_process(pid);
+  char *file = copy_in_string (file_, esp);
+  pid_t pid = process_execute ((char *) file_);
+  struct process *child = thread_get_child_process (pid);
   if (!child) return -1;
-  sema_down(&child->sema_load);
+  sema_down (&child->sema_load);
   if (!child->loaded) return -1;
   palloc_free_page (file);
   return pid;
@@ -241,18 +248,14 @@ int sys_open (const char *file, void *esp){
     return -1;
   }
   struct file_descriptor *new_fd = (struct file_descriptor*) malloc (sizeof(struct file_descriptor));
-  new_fd->handle = get_handle ();
+  struct thread *cur = thread_current ();
+  fd_id++;
+  new_fd->handle = fd_id;
   new_fd->file = open_try;
-  struct thread *cur = thread_current();
   list_push_front(&cur->process->fd_list, &new_fd->elem);
-  palloc_free_page (kfile);
   lock_release (&filesys_lock);
+  palloc_free_page (kfile);
   return new_fd->handle;
-}
-
-int get_handle (){
-  next_fd++;
-  return next_fd;
 }
 
 /* Close system call */
@@ -290,7 +293,6 @@ int sys_read (int handle, uint8_t *buffer, unsigned size, void *esp){
   } 
   struct file_descriptor *fd = lookup_fd (handle);
   if (!fd) sys_exit (-1);
-
   void *kbuff = palloc_get_page(0);
   unsigned bytes = 0;
   while (bytes < size){
@@ -307,7 +309,7 @@ int sys_read (int handle, uint8_t *buffer, unsigned size, void *esp){
 }
 
 /* Tell system call */
-unsigned tell (int handle){
+unsigned sys_tell (int handle){
   lock_acquire (&filesys_lock);
   struct file_descriptor *fd = lookup_fd (handle);
   if (!fd){
@@ -321,7 +323,7 @@ unsigned tell (int handle){
 }
 
 /* Seek system call */
-void seek (int handle, unsigned position){
+void sys_seek (int handle, unsigned position){
   lock_acquire (&filesys_lock);
   struct file_descriptor *fd = lookup_fd (handle);
   if (!fd){
@@ -333,11 +335,67 @@ void seek (int handle, unsigned position){
   lock_release (&filesys_lock);
 }
 
-/* Checks whether a user pointer is valid */
-static void is_valid_pointer (const void *p){
-  if (!p || !is_user_vaddr (p) ||  !pagedir_get_page (thread_current ()->pagedir, p)){
-    sys_exit (-1);
+int sys_mmap (int handle, void *vaddr){
+  struct thread *cur = thread_current ();
+  struct file_descriptor *fd = lookup_fd (handle);
+  if (!fd)
+    return ERROR;
+  struct file *old_file = fd->file;
+  if (!old_file ||
+      !is_user_vaddr (vaddr) ||
+      ((uint32_t) vaddr % PGSIZE) != 0 ||
+      vaddr == 0 ||
+      file_length (old_file) == 0)
+    return ERROR;
+  struct file *file = file_reopen (old_file);
+  if (!file)
+    return ERROR;
+  cur->map_id++;
+  int32_t ofs = 0;
+  uint32_t read_bytes = file_length (file);
+  uint32_t page_read_bytes;
+  uint32_t page_zero_bytes;
+  while (read_bytes > 0){
+    page_read_bytes = read_bytes > PGSIZE ? PGSIZE : read_bytes;
+    page_zero_bytes = PGSIZE - page_read_bytes;
+    struct page *sp = add_mmap_to_page_table (file, ofs, vaddr, page_read_bytes, page_zero_bytes);
+    if (!sp){
+      sys_munmap (cur->map_id);
+      return ERROR;
+    }
+    struct frame *frame = frame_alloc_and_lock (sp);
+    if (!frame)
+      return ERROR;
+    sp->frame = frame;
+    if (sp->read_bytes > 0){
+      lock_acquire (&filesys_lock);
+      if ((int) sp->read_bytes != file_read_at (sp->file, frame->base, sp->read_bytes, sp->offset)){
+	lock_release (&filesys_lock);
+	frame_free (frame);
+	return ERROR;
+      }
+      lock_release (&filesys_lock);
+      memset (frame + sp->read_bytes, 0, sp->zero_bytes);
+    }
+    if (!install_page (sp->vaddr, frame->base, sp->writable)){
+      frame_free (frame);
+      return ERROR;
+    }
+    sp->is_loaded = true;
+    read_bytes -= page_read_bytes;
+    ofs += page_read_bytes;
+    vaddr += PGSIZE;
   }
+  return cur->map_id;
+}
+
+void sys_munmap (int mapping){
+  process_remove_mmap (mapping);
+}
+
+void is_valid_pointer (const void *vaddr, void *esp UNUSED){
+  if (!vaddr || !is_user_vaddr (vaddr) || !pagedir_get_page (thread_current ()->pagedir, vaddr))
+    sys_exit (ERROR);
 }
 
 bool is_stack_access(void *vaddr, void *esp){

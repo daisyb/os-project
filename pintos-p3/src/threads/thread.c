@@ -96,8 +96,8 @@ thread_init (void)
   lock_init (&tid_lock);
   list_init (&ready_list);
   list_init (&all_list);
-  next_fd = 1;
   lock_init (&filesys_lock);
+  fd_id = 1;
 
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
@@ -191,7 +191,7 @@ thread_create (const char *name, int priority,
   struct process *p = malloc(sizeof(struct process));
   init_process(p, tid);
   t->process = p;
-  spt_init(&t->spt);
+  spt_init(&t->spt); 		/* Has to stay here for some reason */
 
   /* Stack frame for kernel_thread(). */
   kf = alloc_frame (t, sizeof *kf);
@@ -480,6 +480,8 @@ init_thread (struct thread *t, const char *name, int priority)
   t->priority = priority;
   t->magic = THREAD_MAGIC;
   list_init(&t->children);
+  list_init(&t->mmap_list);
+  t->map_id = 1;
   
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
@@ -599,9 +601,6 @@ allocate_tid (void)
 /* Offset of `stack' member within `struct thread'.
    Used by switch.S, which can't figure it out on its own. */
 uint32_t thread_stack_ofs = offsetof (struct thread, stack);
-
-
-/* NEW FUNCTIONS FOR P2 */
 
 /* goes through the process's list of file descriptors until it finds the matching one, NULL otherwise */
 struct file_descriptor *lookup_fd (int handle){

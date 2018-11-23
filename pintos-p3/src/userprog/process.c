@@ -114,6 +114,8 @@ process_exit (void)
   struct thread *cur = thread_current ();
   uint32_t *pd;
 
+  process_remove_mmap (CLOSE_ALL);
+
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
   pd = cur->pagedir;
@@ -564,5 +566,60 @@ process_close_files(){
     fd = list_entry (e, struct file_descriptor, elem);
     sys_close (fd->handle);
     e = next_e;
+  }
+}
+
+bool process_add_mmap (struct page *sp){
+  struct mmap_file *mf = (struct mmap_file *) malloc (sizeof (struct mmap_file));
+  if (!mf)
+    return false;
+  mf->sp = sp;
+  struct thread *cur = thread_current ();
+  mf->id = cur->map_id;
+  list_push_front (&cur->mmap_list, &mf->elem);
+  return true;
+}
+
+void process_remove_mmap (int mapping){
+  struct thread *cur = thread_current ();
+  struct list_elem *e = list_begin (&cur->mmap_list);
+  struct list_elem *next;
+  struct file *file = NULL;
+  int close = 0;
+  struct mmap_file *mf;
+  while (e != list_end (&cur->mmap_list)){
+    next = list_next (e);
+    mf = list_entry (e, struct mmap_file, elem);
+    if (mf->id == mapping || mapping == CLOSE_ALL){
+      if (mf->sp->is_loaded){
+	if (pagedir_is_dirty (cur->pagedir, mf->sp->vaddr)){
+	  lock_acquire (&filesys_lock);
+	  file_write_at (mf->sp->file, mf->sp->vaddr, mf->sp->read_bytes, mf->sp->offset);
+	  lock_release (&filesys_lock);
+	}
+	frame_free (mf->sp->frame);
+	pagedir_clear_page (cur->pagedir, mf->sp->vaddr);
+      }
+      if (mf->sp->type != HASH_ERROR)
+	hash_delete (&cur->spt, &mf->sp->elem);
+      list_remove (&mf->elem);
+      if (mf->id != close){
+	if (file){
+	  lock_acquire (&filesys_lock);
+	  file_close (file);
+	  lock_release (&filesys_lock);
+	}
+	close = mf->id;
+	file = mf->sp->file;
+      }
+      free (mf->sp);
+      free (mf);
+    }
+    e = next;
+  }
+  if (file){
+    lock_acquire (&filesys_lock);
+    file_close (file);
+    lock_release (&filesys_lock);
   }
 }

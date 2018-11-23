@@ -102,16 +102,13 @@ struct process {
   struct semaphore sema_exit;   /* semaphore to signal waiting parents */
   struct semaphore sema_load;   /* semaphore to signal that process has loaded */
   struct list fd_list;		/* List of file descriptors. */
-
+  //int fd_id;
   struct list_elem elem;        /* List element for children list of parent */
 };
 
-/* Used to find new file descriptor handles when open() is called */
-int next_fd;
-//struct list available_fd_list;
-
 /* Used to lock the filesystem and prevent conflicts */
 struct lock filesys_lock;
+int fd_id;
 
 struct thread
   {
@@ -131,6 +128,8 @@ struct thread
     struct process *process;            /* Shared data btwn process and parent, freed by parent */
 
     struct hash spt; 		/* Supplemental page table */
+    struct list mmap_list;
+    int map_id;
 
     void *user_esp;                     /* User's stack pointer. */
     

@@ -4,13 +4,13 @@
 #include "threads/malloc.h"
 #include "threads/palloc.h"
 #include "threads/loader.h"
+#include <stdio.h>
 
 
 static struct frame *frames;
 static size_t frame_cnt;
 
 static struct lock scan_lock;
-static size_t hand;
 
 static struct frame *find_free_frame(void);
 

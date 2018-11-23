@@ -5,6 +5,9 @@
 #include "process.h"
 #include <list.h>
 
+#define CLOSE_ALL -1
+#define ERROR -1
+
 void syscall_init (void);
 int sys_write (int, void *, unsigned);
 int sys_create (const char *, unsigned, void *);
@@ -18,8 +21,10 @@ void sys_close (int handle);
 int sys_remove (const char *, void *);
 int sys_filesize (int handle);
 int sys_read (int handle, uint8_t *buffer, unsigned size, void *);
-unsigned tell (int handle);
-void seek (int handle, unsigned position);
+unsigned sys_tell (int handle);
+void sys_seek (int handle, unsigned position);
+int sys_mmap (int handle, void *vaddr);
+void sys_munmap (int mapping);
 
 /* Stack */
 bool is_stack_access(void *vaddr, void *);

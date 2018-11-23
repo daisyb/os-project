@@ -15,7 +15,8 @@
 #include "filesys/file.h"
 
 #define FILE 0
-#define SWAP 1
+#define MMAP 1
+#define HASH_ERROR 2
 #define STACK_MAX (1024 * 1024)
 
 struct page {
@@ -24,7 +25,6 @@ struct page {
   uint8_t type;
   bool writable;
   bool is_loaded;
-  bool busy;
 
   /* Data only relevant to files */
   struct file *file;
@@ -38,6 +38,8 @@ struct page {
   struct hash_elem elem;
 };
 
+bool install_page (void *upage, void *kpage, bool writable);
+
 /* Returns a hash value for the page that E refers to. */
 unsigned page_hash (const struct hash_elem *e, void *aux UNUSED);
 
@@ -49,8 +51,8 @@ void spt_destroy (struct hash *spt);
 struct page *get_sp (void *vaddr);
 bool load_page (struct page *sp);
 bool load_swap (struct page *sp);
-bool load_file (struct page *sp);
 struct page *add_to_page_table (uint8_t *upage, bool writable);
+struct page *add_mmap_to_page_table (struct file *file, int32_t ofs, uint8_t *upage, uint32_t read_bytes, uint32_t zero_bytes);
 
 /* Destroys a page, which must be in the current process's
    page table.  Used as a callback for hash_destroy(). */
