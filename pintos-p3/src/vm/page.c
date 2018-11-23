@@ -1,4 +1,4 @@
-#include "vm/frame.h"
+#include "vm/swap.h"
 #include <stdio.h>
 /* Adds a mapping from user virtual address UPAGE to kernel
    virtual address KPAGE to the page table.
@@ -9,12 +9,21 @@
    with palloc_get_page().
    Returns true on success, false if UPAGE is already mapped or
    if memory allocation fails. */
-bool install_page (void *upage, void *kpage, bool writable){
-  struct thread *t = thread_current ();
+/* <<<<<<< HEAD */
+/* bool install_page (void *upage, void *kpage, bool writable){ */
+/*   struct thread *t = thread_current (); */
+bool install_page (struct page *p, bool writable){
   /* Verify that ther's not already a page at that virtual
      address, then map our page there. */
-  return (pagedir_get_page (t->pagedir, upage) == NULL
-	  && pagedir_set_page (t->pagedir, upage, kpage, writable));
+  return (pagedir_get_page (p->pagedir, p->vaddr) == NULL
+	  && pagedir_set_page (p->pagedir, p->vaddr, page_physaddr(p), writable));
+}
+
+/*
+ removes UPAGE from page table
+*/
+static void uninstall_page(struct page *p){
+  pagedir_clear_page(p->pagedir, p->vaddr);
 }
 
 unsigned page_hash (const struct hash_elem *e, void *aux UNUSED){
@@ -34,38 +43,43 @@ void spt_init (struct hash *spt){
   hash_init (spt, page_hash, page_less, NULL);
 }
 
+static void deallocate_page(struct page *p){
+  if (p->type == SWAP) swap_free_slot(p->swap_index);
+  if (p->frame){
+    frame_lock(p->frame);
+    frame_free(p->frame);
+  }
+  uninstall_page(p);
+  free(p);
+}
+/* Destroys a page, which must be in the current process's
+   page table.  Used as a callback for hash_destroy(). */
+static void destroy_page (struct hash_elem *p_, void *aux UNUSED)
+{
+  struct page *sp = hash_entry (p_, struct page, elem);
+  deallocate_page(sp);
+}
+
+/* Destroys the current process's supp page table. */
+void spt_destroy (struct hash *spt){
+  hash_destroy(spt, destroy_page);
+}
+
 struct page *get_sp (void *vaddr){
   struct page sp;
   sp.vaddr = pg_round_down (vaddr);
   struct thread *cur = thread_current ();
   struct hash_elem *e = hash_find (&cur->spt, &sp.elem);
-  if (!e)
+  if (!e){
     return NULL;
+  }
   return hash_entry (e, struct page, elem);
 }
 
-struct page *add_to_page_table (uint8_t *upage, bool writable){
-  struct page *sp = malloc (sizeof (struct page));
-  if (!sp)
-    return NULL;
-  sp->vaddr = upage;
-  struct frame *frame = frame_alloc_and_lock (sp);
-  if (!frame){
-    free (sp);
-    return NULL;
-  }
-  sp->frame = frame;
-  if (!install_page (upage, frame->base, writable)){
-    frame_free (frame);
-    free (sp);
-    return NULL;
-  }
-  hash_insert (&(thread_current ()->spt), &sp->elem);
-  return sp;
-}
 
 struct page *add_mmap_to_page_table (struct file *file, int32_t ofs, uint8_t *upage, uint32_t read_bytes, uint32_t zero_bytes){
   struct page *sp = (struct page *) malloc (sizeof (struct page));
+  struct thread *cur = thread_current ();
   if (!sp)
     return NULL;
   sp->file = file;
@@ -76,14 +90,144 @@ struct page *add_mmap_to_page_table (struct file *file, int32_t ofs, uint8_t *up
   sp->writable = true;
   sp->is_loaded = false;
   sp->type = MMAP;
+  sp->pagedir = cur->pagedir;
   if (!process_add_mmap (sp)){
     free (sp);
     return NULL;
   }
-  struct thread *cur = thread_current ();
   if (hash_insert (&cur->spt, &sp->elem)){
     sp->type = HASH_ERROR;
     return NULL;
   }
   return sp;
+}
+
+bool load_page (struct page *sp){
+  bool success = false;
+  switch (sp->type){
+    case FILE:
+    success = load_file (sp);
+    break;
+    case SWAP:
+    success = load_swap (sp);
+    if (success) sp->type = MEMORY;
+    break;
+  case MEMORY:
+    success = load_memory(sp);
+  }
+  if (success){
+    if (!install_page (sp, sp->writable)){
+      frame_free (sp->frame);
+      sp->frame = NULL;
+      return false;
+    }
+  }
+  frame_unlock(sp->frame);
+  return success;
+}
+
+bool load_swap (struct page *sp){
+  struct frame *frame = frame_alloc_and_lock(sp);
+  if (!frame){
+    return false;
+  }
+  sp->frame = frame;
+  if (!swap_in (sp)){
+    deallocate_page(sp); // if page wasn't on swap space just ditch it
+    return false;
+  }
+  return true;
+}
+
+bool load_memory(struct page *sp){
+  struct frame *frame = frame_alloc_and_lock (sp);
+  if (!frame){
+    return false;
+  }
+  sp->frame = frame;
+  return true;
+}
+bool load_file (struct page *sp){
+  struct frame *frame = frame_alloc_and_lock (sp);
+  if (!frame)
+    return false;
+  if (sp->read_bytes > 0){
+    lock_acquire (&filesys_lock);
+    if ((int) sp->read_bytes != file_read_at (sp->file, frame->base, sp->read_bytes, sp->offset)){
+      lock_release (&filesys_lock);
+      frame_free (frame);
+      return false;
+    }
+    lock_release (&filesys_lock);
+  }
+  memset (frame->base + sp->read_bytes, 0, sp->zero_bytes);
+  sp->frame = frame;
+  return true;
+}
+
+struct page *add_to_page_table (uint8_t *upage, bool writable, int type){
+  struct page *sp;
+  if((sp = get_sp(upage))) return sp;
+  sp = malloc (sizeof (struct page));
+  if (!sp)
+    return NULL;
+  sp->vaddr = pg_round_down(upage);
+  sp->type = type;
+  sp->writable = writable;
+  sp->frame = NULL;
+  sp->pagedir = thread_current()->pagedir;
+  hash_insert (&(thread_current ()->spt), &sp->elem);
+  if (type == MEMORY) load_page(sp);
+  return sp;
+}
+
+/* Evicts page P.
+   P must have a locked frame.
+   Return true if successful, false on failure. */
+bool page_out (struct page *p){
+  ASSERT(frame_lock_held_by_current_thread(p));
+  int success = true;
+  if (p->type != FILE || page_is_dirty(p)){
+    success = swap_out(p);
+    p->type = SWAP;
+  }
+  uninstall_page(p);
+  frame_free(p->frame);
+  p->frame = NULL;
+  return success;
+}
+
+/* Trys to add page containing FAULT_ADDR to memory.
+   Returns true if successful, false on failure. */
+bool page_in (void *fault_addr){
+  struct page *p = get_sp(fault_addr);
+  return p && load_page(p);
+}
+
+bool page_accessed_recently (struct page *p) {
+  return pagedir_is_accessed(p->pagedir, p->vaddr);
+}
+
+void page_clear_accessed(struct page *p){
+  pagedir_set_accessed(p->pagedir, p->vaddr, false);
+}
+
+bool page_is_dirty(struct page *p){
+  return pagedir_is_dirty(p->pagedir, p->vaddr);
+}  
+
+bool page_lock (void *addr){
+  struct page *p = get_sp(addr);
+  if (!p || !p->frame) return false;
+  frame_lock(p->frame);
+  return true;
+}
+void page_unlock (void *addr) {
+  struct page *p = get_sp(addr);
+  frame_unlock(p->frame);
+}
+
+void *page_physaddr(struct page *p){
+  if(!p || !p->frame) return NULL;
+  return p->frame->base;
 }

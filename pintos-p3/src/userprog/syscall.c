@@ -1,3 +1,4 @@
+
 #include "userprog/syscall.h"
 #include <stdio.h>
 #include <syscall-nr.h>
@@ -43,19 +44,31 @@ static inline bool put_user (uint8_t *udst, uint8_t byte){
 static void write_out(void *udst_, void *ksrc_, size_t size, void *esp){
   uint8_t *udst = udst_;
   uint8_t *ksrc = ksrc_;
+  int locked = page_lock(udst);
   for (; size > 0; size--, udst++, ksrc++){
     while(udst >= (uint8_t *) PHYS_BASE || !put_user (udst, *ksrc)){
-      if (!try_grow_stack(udst, esp)) sys_exit(-1);
+      if (locked) page_unlock(udst);
+      if (!page_in(udst) && !try_grow_stack(udst, esp)){
+        sys_exit(-1);
+      }
+      locked = page_lock(udst);
     }
   }
+  if (locked) page_unlock(udst);
 }
 
 static void write_stdin(void *udst_, size_t size, void *esp){
   uint8_t *udst = udst_;
   for (; size > 0; size--, udst++){
+    int locked = page_lock(udst);
     while (udst >= (uint8_t *) PHYS_BASE || !put_user (udst, input_getc())){
-      if (!try_grow_stack(udst, esp)) sys_exit(-1);
+      if (locked) page_unlock(udst);
+      if (!page_in(udst) && !try_grow_stack(udst, esp)){
+        sys_exit(-1);
+      }
+      locked = page_lock(udst);
     }
+    if (locked) page_unlock(udst);
   }
 }
 
@@ -65,9 +78,14 @@ static void copy_in (void *dst_, const void *usrc_, size_t size, void *esp){
   uint8_t *dst = dst_;
   uint8_t *usrc = (uint8_t *)usrc_;
   for (; size > 0; size--, dst++, usrc++){
+    int locked = page_lock(usrc);
     while(usrc >= (uint8_t *) PHYS_BASE || !get_user (dst, usrc)){
-      if (!try_grow_stack(usrc, esp)) sys_exit(-1);
+      if (!page_in(usrc) && !try_grow_stack(usrc, esp)){
+        if (locked) page_unlock(usrc);
+        sys_exit(-1);
+      }
     }
+    if (locked) page_unlock(usrc);
   }
 }
 
@@ -79,20 +97,20 @@ UNUSED static char *copy_in_string (const char *us_, void *esp UNUSED){
   ks = palloc_get_page (0);
   if (ks == NULL)
     thread_exit ();
-
+  int locked = page_lock(us);
   for (i=0; i<PGSIZE; i++){
     while(us+i >= (const char *) PHYS_BASE || 
           !get_user ((uint8_t *)ks+i, (uint8_t *)us+i))
       {
-        if (!try_grow_stack(us+i, esp)){
+        if (!page_in(us+1) && !try_grow_stack(us+i, esp)){
           palloc_free_page(ks);
+          if (locked) page_unlock(us);
           sys_exit(-1);
         }
       }      
-    if (us[i] == '\0'){
-      return ks;
-    }
+    if (us[i] == '\0') break;
   }
+  if (locked) page_unlock(us);
   return ks;
 }
 
@@ -170,19 +188,23 @@ void syscall_init (void){
 int sys_write (int handle, void *usrc_, unsigned size){
   is_valid_pointer (usrc_, NULL);
   char *usrc = usrc_;
+  page_lock(usrc);
   int bytes; 
   if (handle == STDOUT_FILENO){
     putbuf (usrc, size);
+    page_unlock(usrc);
     return size;
   }
   lock_acquire (&filesys_lock);
   struct file_descriptor *fd = lookup_fd(handle);
   if (!fd) {
     lock_release (&filesys_lock);
+    page_unlock(usrc);
     sys_exit (-1);
   }
   bytes = file_write (fd->file, usrc, size);
   lock_release (&filesys_lock);
+  page_unlock(usrc);
   return bytes;
 }
 
@@ -377,7 +399,7 @@ int sys_mmap (int handle, void *vaddr){
       lock_release (&filesys_lock);
       memset (frame + sp->read_bytes, 0, sp->zero_bytes);
     }
-    if (!install_page (sp->vaddr, frame->base, sp->writable)){
+    if (!install_page (sp, sp->writable)){
       frame_free (frame);
       return ERROR;
     }
@@ -412,6 +434,6 @@ bool is_stack_access(void *vaddr, void *esp){
 bool try_grow_stack(void *uaddr, void *esp){
   if (!is_stack_access(uaddr, esp)|| uaddr < (void *)(PHYS_BASE - MAX_STACK_SZ))
     return false;
-  return add_to_page_table(pg_round_down(uaddr), true) != NULL;
+  return add_to_page_table(pg_round_down(uaddr), true, MEMORY) != NULL;
   
 }

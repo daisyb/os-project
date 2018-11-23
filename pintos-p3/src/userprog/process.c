@@ -41,7 +41,6 @@ process_execute (const char *cmdline)
   if (fn_copy == NULL)
     return TID_ERROR;
   strlcpy (fn_copy, cmdline, PGSIZE);
-
   char cmd_cpy[strlen(cmdline) + 1];
   strlcpy(cmd_cpy, cmdline, strlen(cmdline) + 1);
   char *args;
@@ -128,11 +127,14 @@ process_exit (void)
          directory before destroying the process's page
          directory, or our active page directory will be one
          that's been freed (and cleared). */
+      spt_destroy(&cur->spt);
       cur->pagedir = NULL;
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
+  lock_acquire(&filesys_lock);
   file_close(cur->process->executable);
+  lock_release(&filesys_lock);
   process_close_files();
   /* Wakes up waiting parent */
   if (cur->process) sema_up(&cur->process->sema_exit);
@@ -441,36 +443,21 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
          and zero the final PAGE_ZERO_BYTES bytes. */
       size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
       size_t page_zero_bytes = PGSIZE - page_read_bytes;
-
+      
       /* Get a page of memory. */
-      struct page *sp = add_to_page_table (upage, writable);
+      struct page *sp = add_to_page_table (upage, writable, FILE);
       if (sp == NULL)
         return false;
 
+      sp->file = file;
+      sp->offset = ofs;
+      sp->read_bytes = page_read_bytes;
+      sp->zero_bytes = page_zero_bytes;
       
-      /* Load this page. */
-      lock_acquire (&filesys_lock);
-      if (file_read (file, sp->frame->base, page_read_bytes) != (int) page_read_bytes)
-        {
-          lock_release (&filesys_lock);
-	  /* NEED TO REPLACE THIS */
-          //palloc_free_page (kpage);
-          return false; 
-        }
-      lock_release (&filesys_lock);
-      memset (sp->frame->base + page_read_bytes, 0, page_zero_bytes);
-
-      if (page_read_bytes > 0)
-        {
-          sp->file = file;
-          sp->offset = ofs;
-          sp->read_bytes = page_read_bytes;
-          sp->zero_bytes = page_zero_bytes;
-        }
-
       /* Advance. */
       read_bytes -= page_read_bytes;
       zero_bytes -= page_zero_bytes;
+      ofs += page_read_bytes;
       upage += PGSIZE;
     }
   return true;
@@ -545,12 +532,14 @@ static bool
 setup_stack (void **esp, char *cmdline)
 {
   uint8_t *upage = ((uint8_t *) PHYS_BASE) - PGSIZE;
-  struct page *stack_page = add_to_page_table (upage, true);
+  struct page *stack_page = add_to_page_table (upage, true, MEMORY);
   if (!stack_page)
     return false;
   *esp = PHYS_BASE;
   if (strlen(cmdline) + 1 > PGSIZE) return NULL;
-  *esp = setup_args(upage, stack_page->frame->base, cmdline);
+  page_lock(upage);
+  *esp = setup_args(upage, page_physaddr(stack_page), cmdline);
+  page_unlock(upage);
   return true;
 }
 
