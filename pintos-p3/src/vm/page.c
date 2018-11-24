@@ -44,6 +44,7 @@ void spt_init (struct hash *spt){
 }
 
 static void deallocate_page(struct page *p){
+  if (!p) return;
   if (p->type == SWAP) swap_free_slot(p->swap_index);
   if (p->frame){
     frame_lock(p->frame);
@@ -118,7 +119,6 @@ bool load_page (struct page *sp){
   if (success){
     if (!install_page (sp, sp->writable)){
       frame_free (sp->frame);
-      sp->frame = NULL;
       return false;
     }
   }
@@ -131,8 +131,7 @@ bool load_swap (struct page *sp){
   if (!frame){
     return false;
   }
-  sp->frame = frame;
-  if (!swap_in (sp)){
+  if (!swap_in (sp)){    
     deallocate_page(sp); // if page wasn't on swap space just ditch it
     return false;
   }
@@ -144,7 +143,6 @@ bool load_memory(struct page *sp){
   if (!frame){
     return false;
   }
-  sp->frame = frame;
   return true;
 }
 bool load_file (struct page *sp){
@@ -161,7 +159,6 @@ bool load_file (struct page *sp){
     lock_release (&filesys_lock);
   }
   memset (frame->base + sp->read_bytes, 0, sp->zero_bytes);
-  sp->frame = frame;
   return true;
 }
 
@@ -193,7 +190,6 @@ bool page_out (struct page *p){
   }
   uninstall_page(p);
   frame_free(p->frame);
-  p->frame = NULL;
   return success;
 }
 
@@ -202,6 +198,15 @@ bool page_out (struct page *p){
 bool page_in (void *fault_addr){
   struct page *p = get_sp(fault_addr);
   return p && load_page(p);
+}
+
+bool page_present(void *addr){
+  return get_sp(addr) != NULL;
+}
+
+bool page_is_writable(void *addr){
+  struct page *p = get_sp(addr);
+  return p && p->writable;
 }
 
 bool page_accessed_recently (struct page *p) {
@@ -218,7 +223,10 @@ bool page_is_dirty(struct page *p){
 
 bool page_lock (void *addr){
   struct page *p = get_sp(addr);
-  if (!p || !p->frame) return false;
+  if (!p) return false;
+  if (!p->frame){
+    if (!load_page(p)) return false;
+  }
   frame_lock(p->frame);
   return true;
 }

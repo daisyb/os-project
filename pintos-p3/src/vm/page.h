@@ -68,3 +68,5 @@ bool page_is_dirty(struct page *p);
 bool page_lock (void *addr);
 void page_unlock (void *addr);
 void *page_physaddr(struct page *p);
+bool page_present(void *addr);
+bool page_is_writable(void *addr);

@@ -19,7 +19,7 @@
 #define PUSHA_BYTES 32
 #define MAX_STACK_SZ 8000000 //8 MB
 
-static void is_valid_pointer (const void *vaddr, void *esp UNUSED);
+static void is_valid_pointer (const void *vaddr);
 
 /* Copies a byte from user address USRC to kernel address DST. USRC must
    be below PHYS_BASE. Returns true if successful, false if a segfault occurred. */
@@ -44,52 +44,53 @@ static inline bool put_user (uint8_t *udst, uint8_t byte){
 static void write_out(void *udst_, void *ksrc_, size_t size, void *esp){
   uint8_t *udst = udst_;
   uint8_t *ksrc = ksrc_;
-  //int locked = page_lock(udst);
+  uint8_t *base = pg_round_down(udst);
+  try_grow_stack(udst, esp);
+  int locked = page_lock(base);
+  if (!locked) sys_exit(ERROR);
   for (; size > 0; size--, udst++, ksrc++){
     while(udst >= (uint8_t *) PHYS_BASE || !put_user (udst, *ksrc)){
-      //if (locked) page_unlock(udst);
-      if (!page_in(udst) && !try_grow_stack(udst, esp)){
-        sys_exit(-1);
+      if (locked) page_unlock(base);
+      if (!page_is_writable(udst) && !try_grow_stack(udst, esp)){
+        sys_exit(ERROR);
+      } else {
+        base = pg_round_down(udst);
+        locked = page_lock(base);
+        if (!locked) sys_exit(ERROR);
       }
-      //locked = page_lock(udst);
     }
   }
-  //if (locked) page_unlock(udst);
+  page_unlock(base);
 }
 
 static void write_stdin(void *udst_, size_t size, void *esp){
   uint8_t *udst = udst_;
+  int locked = page_lock(udst);
+  if (!locked) sys_exit(-1);
   for (; size > 0; size--, udst++){
-    int locked = page_lock(udst);
     while (udst >= (uint8_t *) PHYS_BASE || !put_user (udst, input_getc())){
-      if (locked) page_unlock(udst);
-      if (!page_in(udst) && !try_grow_stack(udst, esp)){
-        sys_exit(-1);
+      if (!try_grow_stack(udst, esp)){
+        page_unlock(udst);
+        sys_exit(ERROR);
       }
-      locked = page_lock(udst);
     }
-    if (locked) page_unlock(udst);
   }
+  page_unlock(udst);
 }
 
 /* Copies SIZE bytes from user address USRC to kernel address DST. Calls
    thread_exit() if any of the user accesses are invalid. */
-static void copy_in (void *dst_, const void *usrc_, size_t size, void *esp){
+static void copy_in (void *dst_, const void *usrc_, size_t size){
   uint8_t *dst = dst_;
   uint8_t *usrc = (uint8_t *)usrc_;
   for (; size > 0; size--, dst++, usrc++){
-    int locked = page_lock(usrc);
-    while(usrc >= (uint8_t *) PHYS_BASE || !get_user (dst, usrc)){
-      if (!page_in(usrc) && !try_grow_stack(usrc, esp)){
-        if (locked) page_unlock(usrc);
-        sys_exit(-1);
-      }
+    if(usrc >= (uint8_t *) PHYS_BASE || !get_user (dst, usrc)){
+      sys_exit(ERROR);
     }
-    if (locked) page_unlock(usrc);
   }
 }
 
-static char *copy_in_string (const char *us_, void *esp){
+static char *copy_in_string (const char *us_){
   char *ks;
   int i;
   char *us = (char *)us_;
@@ -98,19 +99,19 @@ static char *copy_in_string (const char *us_, void *esp){
   if (ks == NULL)
     thread_exit ();
   int locked = page_lock(us);
+  if (!locked) sys_exit(-1);
   for (i=0; i<PGSIZE; i++){
-    while(us+i >= (const char *) PHYS_BASE || 
+    if(us+i >= (const char *) PHYS_BASE || 
           !get_user ((uint8_t *)ks+i, (uint8_t *)us+i))
       {
-        if (!page_in(us+1) && !try_grow_stack(us+i, esp)){
-          palloc_free_page(ks);
-          if (locked) page_unlock(us);
-          sys_exit(-1);
-        }
-      }      
+        palloc_free_page(ks);
+        page_unlock(us);
+        sys_exit(ERROR);
+      }
+        
     if (us[i] == '\0') break;
   }
-  if (locked) page_unlock(us);
+  page_unlock(us);
   return ks;
 }
 
@@ -119,7 +120,7 @@ static void get_args (struct intr_frame *f, int *args, int argc){
   int *vaddr;
   for (i=0; i<argc; i++){
     vaddr = (int *) f->esp + 1 + i;
-    is_valid_pointer ((const void *) vaddr, f->esp);
+    is_valid_pointer ((const void *) vaddr);
     args[i] = *vaddr;
   }
 }
@@ -154,7 +155,7 @@ struct handler_entry handlers[] = {
 
 static void syscall_handler (struct intr_frame *f){
   unsigned call_nr;
-  copy_in (&call_nr, f->esp, sizeof call_nr, f->esp);
+  copy_in (&call_nr, f->esp, sizeof call_nr);
 
   unsigned i;
   for (i = 0; i < num_handlers; i++){
@@ -186,25 +187,27 @@ void syscall_init (void){
 
 /* Write system call */
 int sys_write (int handle, void *usrc_, unsigned size){
-  is_valid_pointer (usrc_, NULL);
+  is_valid_pointer (usrc_);
   char *usrc = usrc_;
-  //page_lock(usrc);
   int bytes; 
   if (handle == STDOUT_FILENO){
+    int locked = page_lock(usrc);
+    if (!locked) sys_exit(ERROR);
     putbuf (usrc, size);
-    //page_unlock(usrc);
+    page_unlock(usrc);
     return size;
   }
   lock_acquire (&filesys_lock);
   struct file_descriptor *fd = lookup_fd(handle);
   if (!fd) {
     lock_release (&filesys_lock);
-    //page_unlock(usrc);
     sys_exit (-1);
   }
+  int locked = page_lock(usrc);
+  if (!locked) sys_exit(ERROR);
   bytes = file_write (fd->file, usrc, size);
+  page_unlock(usrc);
   lock_release (&filesys_lock);
-  //page_unlock(usrc);
   return bytes;
 }
 
@@ -226,8 +229,8 @@ void sys_halt (void){
 }
 
 /* Exec system call */
-pid_t sys_exec (const char *file_, void *esp){
-  char *file = copy_in_string (file_, esp);
+pid_t sys_exec (const char *file_){
+  char *file = copy_in_string (file_);
   pid_t pid = process_execute ((char *) file_);
   struct process *child = thread_get_child_process (pid);
   if (!child) return -1;
@@ -243,8 +246,8 @@ int sys_wait (pid_t pid){
 }
 
 /* Create system call */
-int sys_create (const char *file, unsigned initial_size, void *esp){
-  char *kfile = copy_in_string (file, esp);
+int sys_create (const char *file, unsigned initial_size){
+  char *kfile = copy_in_string (file);
   lock_acquire (&filesys_lock);
   int create_try = filesys_create (kfile, initial_size);
   lock_release (&filesys_lock);
@@ -253,16 +256,16 @@ int sys_create (const char *file, unsigned initial_size, void *esp){
 }
 
 /* Remove system call */
-int sys_remove (const char *file, void *esp){
-  char *kfile = copy_in_string (file, esp);
+int sys_remove (const char *file){
+  char *kfile = copy_in_string (file);
   int remove_try = filesys_remove (kfile);
   palloc_free_page (kfile);
   return remove_try;
 }
 
 /* Open system call */
-int sys_open (const char *file, void *esp){
-  char *kfile = copy_in_string (file, esp);
+int sys_open (const char *file){
+  char *kfile = copy_in_string (file);
   lock_acquire (&filesys_lock);
   struct file *open_try = filesys_open (kfile);
   if (!open_try){
@@ -415,8 +418,8 @@ void sys_munmap (int mapping){
   process_remove_mmap (mapping);
 }
 
-void is_valid_pointer (const void *vaddr, void *esp UNUSED){
-  if (!vaddr || !is_user_vaddr (vaddr) || !pagedir_get_page (thread_current ()->pagedir, vaddr))
+static void is_valid_pointer (const void *vaddr){
+  if (!vaddr || !is_user_vaddr (vaddr) || !page_present((void *)vaddr))
     sys_exit (ERROR);
 }
 

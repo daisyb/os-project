@@ -82,6 +82,7 @@ static struct frame *try_frame_alloc_and_lock (struct page *page) {
   }
   frame_lock(frame);
   frame->page = page;
+  page->frame = frame;
   lock_release(&scan_lock);
   return frame;
 }
@@ -98,6 +99,7 @@ struct frame *frame_alloc_and_lock (struct page *page) {
 /* Locks P's frame into memory, if it has one.
    Upon return, p->frame will not change until P is unlocked. */
 void frame_lock (struct frame *f) {
+  ASSERT(!lock_held_by_current_thread(&f->lock));
   lock_acquire(&f->lock);
 }
 
@@ -106,8 +108,11 @@ void frame_lock (struct frame *f) {
    Any data in F is lost. */
 void frame_free (struct frame *f) {
   ASSERT(lock_held_by_current_thread(&f->lock));
-  f->page = NULL;
-  lock_release(&f->lock);
+  if (f->page){
+    f->page->frame = NULL;
+    f->page = NULL;
+  }
+  frame_unlock(f);
 }
 
 /* Unlocks frame F, allowing it to be evicted.
