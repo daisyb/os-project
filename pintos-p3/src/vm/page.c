@@ -9,9 +9,6 @@
    with palloc_get_page().
    Returns true on success, false if UPAGE is already mapped or
    if memory allocation fails. */
-/* <<<<<<< HEAD */
-/* bool install_page (void *upage, void *kpage, bool writable){ */
-/*   struct thread *t = thread_current (); */
 bool install_page (struct page *p, bool writable){
   /* Verify that ther's not already a page at that virtual
      address, then map our page there. */
@@ -45,7 +42,9 @@ void spt_init (struct hash *spt){
 
 static void deallocate_page(struct page *p){
   if (!p) return;
-  if (p->type == SWAP) swap_free_slot(p->swap_index);
+  if (p->type == SWAP){
+    load_page(p);
+  }
   if (p->frame){
     frame_lock(p->frame);
     frame_free(p->frame);
@@ -128,9 +127,7 @@ bool load_page (struct page *sp){
 
 bool load_swap (struct page *sp){
   struct frame *frame = frame_alloc_and_lock(sp);
-  if (!frame){
-    return false;
-  }
+  if (!frame) return false;
   if (!swap_in (sp)){    
     deallocate_page(sp); // if page wasn't on swap space just ditch it
     return false;
@@ -147,8 +144,9 @@ bool load_memory(struct page *sp){
 }
 bool load_file (struct page *sp){
   struct frame *frame = frame_alloc_and_lock (sp);
-  if (!frame)
+  if (!frame){
     return false;
+  }
   if (sp->read_bytes > 0){
     lock_acquire (&filesys_lock);
     if ((int) sp->read_bytes != file_read_at (sp->file, frame->base, sp->read_bytes, sp->offset)){
@@ -189,7 +187,6 @@ bool page_out (struct page *p){
     p->type = SWAP;
   }
   uninstall_page(p);
-  frame_free(p->frame);
   return success;
 }
 

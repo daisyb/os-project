@@ -14,13 +14,9 @@
 #include "threads/interrupt.h"
 #include "filesys/file.h"
 
-#define FILE 0
-#define MMAP 1
-#define SWAP 2
-#define MEMORY 3
-#define HASH_ERROR 2
-
 #define STACK_MAX (1024 * 1024)
+
+enum page_types { FILE, MMAP, SWAP, MEMORY, HASH_ERROR};
 
 struct page {
   void *vaddr;

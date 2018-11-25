@@ -45,10 +45,11 @@ static struct frame *find_free_frame(){
   while (!f){
     struct frame *cur_f = &frames[hand];
     if (cur_f->page == NULL){
+      frame_lock(cur_f);
       f = cur_f;
     } else if (page_accessed_recently(cur_f->page)){
       page_clear_accessed(cur_f->page);
-    } else {
+    } else if (lock_try_acquire(&cur_f->lock)){
       f = evict_frame(cur_f);
     }
     hand++;
@@ -64,7 +65,6 @@ Chooses a frame to evict and then evicts it
 */
 static struct frame *evict_frame(struct frame *f){
   ASSERT(f->page != NULL);
-  frame_lock(f);
   if (!page_out(f->page)) return NULL;
   return f;
 }
@@ -80,7 +80,6 @@ static struct frame *try_frame_alloc_and_lock (struct page *page) {
     lock_release(&scan_lock);
     return NULL;
   }
-  frame_lock(frame);
   frame->page = page;
   page->frame = frame;
   lock_release(&scan_lock);
