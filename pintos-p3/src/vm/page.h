@@ -25,6 +25,7 @@ struct page {
   bool writable;
   uint32_t *pagedir;
   bool is_loaded;
+  struct lock lock;
 
   /* Data only relevant to files */
   struct file *file;

@@ -42,16 +42,19 @@ void spt_init (struct hash *spt){
 
 static void deallocate_page(struct page *p){
   if (!p) return;
+  lock_acquire(&p->lock);
   if (p->type == SWAP){
-    load_page(p);
+    swap_free_slot(p->swap_index);
   }
   if (p->frame){
     frame_lock(p->frame);
     frame_free(p->frame);
   }
   uninstall_page(p);
+  lock_release(&p->lock);
   free(p);
 }
+
 /* Destroys a page, which must be in the current process's
    page table.  Used as a callback for hash_destroy(). */
 static void destroy_page (struct hash_elem *p_, void *aux UNUSED)
@@ -115,43 +118,31 @@ bool load_page (struct page *sp){
   case MEMORY:
     success = load_memory(sp);
   }
-  if (success){
-    if (!install_page (sp, sp->writable)){
-      frame_free (sp->frame);
-      return false;
-    }
+  if (success && install_page(sp, sp->writable)){
+    frame_unlock(sp->frame);
+  } else if (sp->frame){
+    frame_free(sp->frame);
   }
-  frame_unlock(sp->frame);
   return success;
 }
 
 bool load_swap (struct page *sp){
   struct frame *frame = frame_alloc_and_lock(sp);
   if (!frame) return false;
-  if (!swap_in (sp)){    
-    deallocate_page(sp); // if page wasn't on swap space just ditch it
-    return false;
-  }
-  return true;
+  return frame && swap_in (sp);
 }
 
 bool load_memory(struct page *sp){
   struct frame *frame = frame_alloc_and_lock (sp);
-  if (!frame){
-    return false;
-  }
-  return true;
+  return frame;
 }
 bool load_file (struct page *sp){
   struct frame *frame = frame_alloc_and_lock (sp);
-  if (!frame){
-    return false;
-  }
+  if (!frame) return false;
   if (sp->read_bytes > 0){
     lock_acquire (&filesys_lock);
     if ((int) sp->read_bytes != file_read_at (sp->file, frame->base, sp->read_bytes, sp->offset)){
       lock_release (&filesys_lock);
-      frame_free (frame);
       return false;
     }
     lock_release (&filesys_lock);
@@ -170,6 +161,7 @@ struct page *add_to_page_table (uint8_t *upage, bool writable, int type){
   sp->type = type;
   sp->writable = writable;
   sp->frame = NULL;
+  lock_init(&sp->lock);
   sp->pagedir = thread_current()->pagedir;
   hash_insert (&(thread_current ()->spt), &sp->elem);
   if (type == MEMORY) load_page(sp);
@@ -181,12 +173,15 @@ struct page *add_to_page_table (uint8_t *upage, bool writable, int type){
    Return true if successful, false on failure. */
 bool page_out (struct page *p){
   ASSERT(frame_lock_held_by_current_thread(p));
+  lock_acquire(&p->lock);
   int success = true;
   if (p->type != FILE || page_is_dirty(p)){
     success = swap_out(p);
     p->type = SWAP;
   }
   uninstall_page(p);
+  p->frame = NULL;
+  lock_release(&p->lock);
   return success;
 }
 
