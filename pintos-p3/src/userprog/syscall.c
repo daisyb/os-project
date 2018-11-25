@@ -383,30 +383,20 @@ int sys_mmap (int handle, void *vaddr){
   while (read_bytes > 0){
     page_read_bytes = read_bytes > PGSIZE ? PGSIZE : read_bytes;
     page_zero_bytes = PGSIZE - page_read_bytes;
-    struct page *sp = add_mmap_to_page_table (file, ofs, vaddr, page_read_bytes, page_zero_bytes);
-    if (!sp){
-      sys_munmap (cur->map_id);
+    struct page *sp = add_to_page_table (vaddr, true, MMAP);
+    if (!sp) return ERROR;
+    if(!process_add_mmap (sp)){
+      hash_delete (&cur->spt, &sp->elem);
+      deallocate_page(sp);
       return ERROR;
     }
-    struct frame *frame = frame_alloc_and_lock (sp);
-    if (!frame)
-      return ERROR;
-    sp->frame = frame;
-    if (sp->read_bytes > 0){
-      lock_acquire (&filesys_lock);
-      if ((int) sp->read_bytes != file_read_at (sp->file, frame->base, sp->read_bytes, sp->offset)){
-	lock_release (&filesys_lock);
-	frame_free (frame);
-	return ERROR;
-      }
-      lock_release (&filesys_lock);
-      memset (frame + sp->read_bytes, 0, sp->zero_bytes);
-    }
-    if (!install_page (sp, sp->writable)){
-      frame_free (frame);
-      return ERROR;
-    }
-    sp->is_loaded = true;
+    
+    sp->file = file;
+    sp->offset = ofs;
+    sp->read_bytes = page_read_bytes;
+    sp->zero_bytes = page_zero_bytes;
+
+
     read_bytes -= page_read_bytes;
     ofs += page_read_bytes;
     vaddr += PGSIZE;

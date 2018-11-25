@@ -40,7 +40,7 @@ void spt_init (struct hash *spt){
   hash_init (spt, page_hash, page_less, NULL);
 }
 
-static void deallocate_page(struct page *p){
+void deallocate_page(struct page *p){
   if (!p) return;
   lock_acquire(&p->lock);
   if (p->type == SWAP){
@@ -48,6 +48,9 @@ static void deallocate_page(struct page *p){
   }
   if (p->frame){
     frame_lock(p->frame);
+    if (p->type == MMAP && page_is_dirty(p)){
+      mmap_write(p);
+    }
     frame_free(p->frame);
   }
   uninstall_page(p);
@@ -79,39 +82,14 @@ struct page *get_sp (void *vaddr){
   return hash_entry (e, struct page, elem);
 }
 
-
-struct page *add_mmap_to_page_table (struct file *file, int32_t ofs, uint8_t *upage, uint32_t read_bytes, uint32_t zero_bytes){
-  struct page *sp = (struct page *) malloc (sizeof (struct page));
-  struct thread *cur = thread_current ();
-  if (!sp)
-    return NULL;
-  sp->file = file;
-  sp->offset = ofs;
-  sp->vaddr = upage;
-  sp->read_bytes = read_bytes;
-  sp->zero_bytes = zero_bytes;
-  sp->writable = true;
-  sp->is_loaded = false;
-  sp->type = MMAP;
-  sp->pagedir = cur->pagedir;
-  if (!process_add_mmap (sp)){
-    free (sp);
-    return NULL;
-  }
-  if (hash_insert (&cur->spt, &sp->elem)){
-    sp->type = HASH_ERROR;
-    return NULL;
-  }
-  return sp;
-}
-
 bool load_page (struct page *sp){
   bool success = false;
   switch (sp->type){
-    case FILE:
+  case FILE:
+  case MMAP:
     success = load_file (sp);
     break;
-    case SWAP:
+  case SWAP:
     success = load_swap (sp);
     if (success) sp->type = MEMORY;
     break;
@@ -122,13 +100,13 @@ bool load_page (struct page *sp){
     frame_unlock(sp->frame);
   } else if (sp->frame){
     frame_free(sp->frame);
+    success = false;
   }
   return success;
 }
 
 bool load_swap (struct page *sp){
   struct frame *frame = frame_alloc_and_lock(sp);
-  if (!frame) return false;
   return frame && swap_in (sp);
 }
 
@@ -153,7 +131,7 @@ bool load_file (struct page *sp){
 
 struct page *add_to_page_table (uint8_t *upage, bool writable, int type){
   struct page *sp;
-  if((sp = get_sp(upage))) return sp;
+  if((sp = get_sp(upage))) return NULL;
   sp = malloc (sizeof (struct page));
   if (!sp)
     return NULL;
@@ -168,6 +146,20 @@ struct page *add_to_page_table (uint8_t *upage, bool writable, int type){
   return sp;
 }
 
+bool mmap_write(struct page *p){
+  ASSERT(frame_lock_held_by_current_thread(p));
+  if (p->read_bytes > 0){
+    lock_acquire (&filesys_lock);
+    if ((int) p->read_bytes != file_write_at (p->file, page_physaddr(p), p->read_bytes, p->offset)){
+      lock_release (&filesys_lock);
+      return false;
+    }
+    lock_release (&filesys_lock);
+  }
+  return true;
+
+}
+
 /* Evicts page P.
    P must have a locked frame.
    Return true if successful, false on failure. */
@@ -175,7 +167,18 @@ bool page_out (struct page *p){
   ASSERT(frame_lock_held_by_current_thread(p));
   lock_acquire(&p->lock);
   int success = true;
-  if (p->type != FILE || page_is_dirty(p)){
+  int swap = true;
+  switch(p->type){
+  case MMAP:
+    if (page_is_dirty(p))
+      success = mmap_write(p);
+    swap = false;
+    break;
+  case FILE:
+    swap = page_is_dirty(p);
+    break;
+  }
+  if (swap){
     success = swap_out(p);
     p->type = SWAP;
   }

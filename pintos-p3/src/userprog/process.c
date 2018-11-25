@@ -581,17 +581,10 @@ void process_remove_mmap (int mapping){
     next = list_next (e);
     mf = list_entry (e, struct mmap_file, elem);
     if (mf->id == mapping || mapping == CLOSE_ALL){
-      if (mf->sp->is_loaded){
-	if (pagedir_is_dirty (cur->pagedir, mf->sp->vaddr)){
-	  lock_acquire (&filesys_lock);
-	  file_write_at (mf->sp->file, mf->sp->vaddr, mf->sp->read_bytes, mf->sp->offset);
-	  lock_release (&filesys_lock);
-	}
-	frame_free (mf->sp->frame);
-	pagedir_clear_page (cur->pagedir, mf->sp->vaddr);
-      }
-      if (mf->sp->type != HASH_ERROR)
-	hash_delete (&cur->spt, &mf->sp->elem);
+      struct file *sp_file = mf->sp->file;
+      hash_delete (&cur->spt, &mf->sp->elem);
+      deallocate_page(mf->sp);
+
       list_remove (&mf->elem);
       if (mf->id != close){
 	if (file){
@@ -600,9 +593,8 @@ void process_remove_mmap (int mapping){
 	  lock_release (&filesys_lock);
 	}
 	close = mf->id;
-	file = mf->sp->file;
+	file = sp_file;
       }
-      free (mf->sp);
       free (mf);
     }
     e = next;

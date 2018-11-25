@@ -16,7 +16,7 @@
 
 #define STACK_MAX (1024 * 1024)
 
-enum page_types { FILE, MMAP, SWAP, MEMORY, HASH_ERROR};
+enum page_types { FILE, MMAP, SWAP, MEMORY};
 
 struct page {
   void *vaddr;
@@ -47,15 +47,13 @@ unsigned page_hash (const struct hash_elem *e, void *aux UNUSED);
 bool page_less (const struct hash_elem *a_, const struct hash_elem *b_, void *aux UNUSED);
 
 void spt_init (struct hash *spt);
+void deallocate_page(struct page *p);
 void spt_destroy (struct hash *spt);
 struct page *get_sp (void *vaddr);
 bool load_page (struct page *sp);
 bool load_swap (struct page *sp);
-//struct page *add_to_page_table (uint8_t *upage, bool writable);
-struct page *add_mmap_to_page_table (struct file *file, int32_t ofs, uint8_t *upage, uint32_t read_bytes, uint32_t zero_bytes);
 bool load_file (struct page *sp);
 bool load_memory(struct page *sp);
-//struct page *add_to_page_tablee (uint8_t *upage, bool writable, int type);
 struct page *add_to_page_table (uint8_t *upage, bool writable, int type);
 bool page_in(void *fault_addr);
 bool page_out(struct page *p);
@@ -67,3 +65,4 @@ void page_unlock (void *addr);
 void *page_physaddr(struct page *p);
 bool page_present(void *addr);
 bool page_is_writable(void *addr);
+bool mmap_write(struct page *p);
