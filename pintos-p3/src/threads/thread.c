@@ -15,6 +15,7 @@
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
+#include "vm/page.h"
 
 /* Random value for struct thread's `magic' member.
    Used to detect stack overflow.  See the big comment at the top
@@ -95,8 +96,8 @@ thread_init (void)
   lock_init (&tid_lock);
   list_init (&ready_list);
   list_init (&all_list);
-  next_fd = 1;
   lock_init (&filesys_lock);
+  fd_id = 1;
 
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
@@ -190,8 +191,8 @@ thread_create (const char *name, int priority,
   struct process *p = malloc(sizeof(struct process));
   init_process(p, tid);
   t->process = p;
-  list_init(&t->process->fd_list);
-  
+  spt_init(&t->spt); 		/* Has to stay here for some reason */
+
   /* Stack frame for kernel_thread(). */
   kf = alloc_frame (t, sizeof *kf);
   kf->eip = NULL;
@@ -473,12 +474,14 @@ init_thread (struct thread *t, const char *name, int priority)
   memset (t, 0, sizeof *t);
   t->status = THREAD_BLOCKED;
   t->is_processs = false;
+  t->user_esp = NULL;
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
   t->magic = THREAD_MAGIC;
   list_init(&t->children);
-  list_init(&t->fd_list);
+  list_init(&t->mmap_list);
+  t->map_id = 1;
   
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
@@ -599,9 +602,6 @@ allocate_tid (void)
    Used by switch.S, which can't figure it out on its own. */
 uint32_t thread_stack_ofs = offsetof (struct thread, stack);
 
-
-/* NEW FUNCTIONS FOR P2 */
-
 /* goes through the process's list of file descriptors until it finds the matching one, NULL otherwise */
 struct file_descriptor *lookup_fd (int handle){
   struct list_elem *e;
@@ -640,6 +640,7 @@ init_process(struct process *p, pid_t pid){
   p->loaded = false;
   sema_init(&p->sema_exit, 0);
   sema_init(&p->sema_load, 0);
+  list_init(&p->fd_list);
 }
 
 /* Adds the process corresponding to tid to the current threads children list */

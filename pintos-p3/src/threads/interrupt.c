@@ -352,14 +352,17 @@ intr_handler (struct intr_frame *frame)
      and they need to be acknowledged on the PIC (see below).
      An external interrupt handler cannot sleep. */
   external = frame->vec_no >= 0x20 && frame->vec_no < 0x30;
-  if (external) 
-    {
-      ASSERT (intr_get_level () == INTR_OFF);
-      ASSERT (!intr_context ());
+  if (external) {
+    ASSERT (intr_get_level () == INTR_OFF);
+    ASSERT (!intr_context ());
 
-      in_external_intr = true;
-      yield_on_return = false;
-    }
+    in_external_intr = true;
+    yield_on_return = false;
+  } 
+  else {
+    //printf("internal %lu\n", frame->esp);
+    thread_current ()->user_esp = frame->esp;
+  }
 
   /* Invoke the interrupt's handler. */
   handler = intr_handlers[frame->vec_no];
