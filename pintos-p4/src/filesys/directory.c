@@ -6,6 +6,8 @@
 #include "filesys/inode.h"
 #include "threads/malloc.h"
 
+#define DIR_ENTRY_CNT BLOCK_SECTOR_SIZE / sizeof(dir_entry)
+
 /* A directory. */
 struct dir 
   {
@@ -21,12 +23,30 @@ struct dir_entry
     bool in_use;                        /* In use or free? */
   };
 
-/* Creates a directory with space for ENTRY_CNT entries in the
-   given SECTOR.  Returns true if successful, false on failure. */
-bool
-dir_create (block_sector_t sector, size_t entry_cnt)
+/* Creates a directory in the given SECTOR.
+   The directory's parent is in PARENT_SECTOR.
+   Returns inode of created directory if successful,
+   null pointer on faiilure.
+   On failure, SECTOR is released in the free map. */
+struct inode *
+dir_create (block_sector_t sector, block_sector_t parent_sector)
 {
-  return inode_create (sector, entry_cnt * sizeof (struct dir_entry));
+  if (!inode_create (sector, BLOCK_SECTOR_SIZE)) return NULL;
+  struct inode *inode = inode_open(sector);
+  if (!inode) 
+    return NULL;
+
+  struct dir* dir = dir_open(inode);
+  if (!dir){
+    inode_close(inode);
+    return NULL;
+  }
+
+  if (!dir_add(dir, ".", sector) || !dir_add(dir, "..", parent_sector)) 
+    inode = NULL; // directory creation failed, return null
+
+  dir_close(dir);
+  return inode;  
 }
 
 /* Opens and returns the directory for the given INODE, of which
@@ -124,6 +144,7 @@ dir_lookup (const struct dir *dir, const char *name,
   ASSERT (dir != NULL);
   ASSERT (name != NULL);
 
+  //TODO: needs inode lock
   if (lookup (dir, name, &e, NULL))
     *inode = inode_open (e.inode_sector);
   else
@@ -152,6 +173,7 @@ dir_add (struct dir *dir, const char *name, block_sector_t inode_sector)
   if (*name == '\0' || strlen (name) > NAME_MAX)
     return false;
 
+  //TODO: inode lock
   /* Check that NAME is not in use. */
   if (lookup (dir, name, NULL, NULL))
     goto done;
@@ -192,6 +214,10 @@ dir_remove (struct dir *dir, const char *name)
   ASSERT (dir != NULL);
   ASSERT (name != NULL);
 
+  if (!strcmp(name, ".") || !strcmp(name, ".."))
+    return false;
+
+  //TODO: lock inode
   /* Find directory entry. */
   if (!lookup (dir, name, &e, &ofs))
     goto done;
@@ -200,6 +226,8 @@ dir_remove (struct dir *dir, const char *name)
   inode = inode_open (e.inode_sector);
   if (inode == NULL)
     goto done;
+
+  //TODO Verift that its not an in-use or empty dir
 
   /* Erase directory entry. */
   e.in_use = false;
@@ -226,8 +254,9 @@ dir_readdir (struct dir *dir, char name[NAME_MAX + 1])
   while (inode_read_at (dir->inode, &e, sizeof e, dir->pos) == sizeof e) 
     {
       dir->pos += sizeof e;
-      if (e.in_use)
+      if (e.in_use) //TODO: extra conditional
         {
+          //TODO: lock inode
           strlcpy (name, e.name, NAME_MAX + 1);
           return true;
         } 
