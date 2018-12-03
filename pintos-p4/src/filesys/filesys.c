@@ -30,6 +30,61 @@ filesys_init (bool format)
   free_map_open ();
 }
 
+/* Extracts a file name part from *SRCP into PART,
+   and updates *SRCP so that the next call will return the next
+   file name part.
+   Returns 1 if successful, 0 at end of string, -1 for a too-long
+   file name part. */
+UNUSED static int
+get_next_part (char part[NAME_MAX], const char **srcp)
+{
+  const char *src = *srcp;
+  char *dst = part;
+
+  /* Skip leading slashes.
+     If it's all slashes, we're done. */
+  while (*src == '/')
+    src++;
+  if (*src == '\0')
+    return 0;
+
+  /* Copy up to NAME_MAX character from SRC to DST.
+     Add null terminator. */
+  while (*src != '/' && *src != '\0')
+    {
+      if (dst < part + NAME_MAX)
+        *dst++ = *src;
+      else
+        return -1;
+      src++;
+    }
+  *dst = '\0';
+
+  /* Advance source pointer. */
+  *srcp = src;
+  return 1;
+}
+
+/* Resolves relative or absolute file NAME.
+   Returns true if successful, false on failure.
+   Stores the directory corresponding to the name into *DIRP,
+   and the file name part into BASE_NAME. */
+UNUSED static bool
+resolve_name_to_entry (const char *name,
+                       struct dir **dirp, char base_name[NAME_MAX + 1])
+{
+  // ...
+}
+
+/* Resolves relative or absolute file NAME to an inode.
+   Returns an inode if successful, or a null pointer on failure.
+   The caller is responsible for closing the returned inode. */
+UNUSED static struct inode *
+resolve_name_to_inode (const char *name)
+{
+  // ...
+}
+
 /* Shuts down the file system module, writing any unwritten data
    to disk. */
 void
