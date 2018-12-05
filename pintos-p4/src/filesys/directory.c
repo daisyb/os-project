@@ -4,10 +4,13 @@
 #include <list.h>
 #include "filesys/filesys.h"
 #include "filesys/inode.h"
+#include "filesys/free-map.h"
 #include "threads/malloc.h"
+#include "threads/thread.h"
 
 #define DIR_ENTRY_CNT BLOCK_SECTOR_SIZE / sizeof(dir_entry)
 
+static bool dir_is_empty(struct inode *i);
 /* A directory. */
 struct dir 
   {
@@ -99,6 +102,13 @@ struct inode *
 dir_get_inode (struct dir *dir) 
 {
   return dir->inode;
+}
+
+/*Returns sector that dir's disk inode resides in*/
+block_sector_t 
+dir_get_inumber(struct dir *dir)
+{
+  return inode_get_inumber(dir_get_inode(dir));
 }
 
 /* Searches DIR for a file with the given NAME.

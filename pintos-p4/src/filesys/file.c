@@ -60,6 +60,13 @@ file_get_inode (struct file *file)
   return file->inode;
 }
 
+/* Returns the sctore of the inode encapsulated by FILE. */
+int
+file_get_inumber (struct file *file) 
+{
+  return inode_get_inumber(file_get_inode(file));
+}
+
 /* Reads SIZE bytes from FILE into BUFFER,
    starting at the file's current position.
    Returns the number of bytes actually read,

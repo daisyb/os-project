@@ -88,9 +88,16 @@ typedef int pid_t;
    blocked state is on a semaphore wait list. */
 
 /* For an individual thread to hold */
+union data_union
+{
+  struct file* file;
+  struct dir* dir;
+};
+
 struct file_descriptor {
   int handle;
-  struct file* file;
+  enum inode_type type;
+  union data_union data;
   struct list_elem elem;
 };
 
