@@ -4,8 +4,8 @@
 #include <string.h>
 #include "filesys/file.h"
 #include "filesys/free-map.h"
-#include "filesys/inode.h"
 #include "filesys/directory.h"
+#include "threads/thread.h"
 
 /* Partition that contains the file system. */
 struct block *fs_device;
@@ -26,8 +26,8 @@ filesys_init (bool format)
 
   if (format) 
     do_format ();
-
   free_map_open ();
+  thread_current()->working_dir = dir_open_root();
 }
 
 /* Extracts a file name part from *SRCP into PART,

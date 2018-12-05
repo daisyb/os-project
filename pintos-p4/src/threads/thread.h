@@ -5,6 +5,7 @@
 #include <list.h>
 #include <stdint.h>
 #include "filesys/file.h"
+#include "filesys/inode.h"
 #include "synch.h"
 
 /* States in a thread's life cycle. */
@@ -130,6 +131,7 @@ struct thread
     struct process *process;            /* Shared data btwn process and parent, freed by parent */
     struct list fd_list;		/* List of file descriptors. */
 
+    struct dir* working_dir;          /* Inode pointing to a proccesses current directory */
     
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
