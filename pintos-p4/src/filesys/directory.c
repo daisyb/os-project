@@ -31,21 +31,19 @@ struct dir_entry
 struct inode *
 dir_create (block_sector_t sector, block_sector_t parent_sector)
 {
-  if (!inode_create (sector, BLOCK_SECTOR_SIZE)) return NULL;
-  struct inode *inode = inode_open(sector);
-  if (!inode) 
-    return NULL;
-
-  struct dir* dir = dir_open(inode);
-  if (!dir){
-    inode_close(inode);
-    return NULL;
-  }
-
-  if (!dir_add(dir, ".", sector) || !dir_add(dir, "..", parent_sector)) 
-    inode = NULL; // directory creation failed, return null
+  struct inode *inode = NULL;
+  struct dir* dir = NULL;
+  bool success = (inode_create (sector, BLOCK_SECTOR_SIZE, DIR_INODE)
+                  && (inode = inode_open(sector))
+                  && (dir = dir_open(inode))
+                  && dir_add(dir, ".", sector)
+                  && dir_add(dir, "..", parent_sector));
 
   dir_close(dir);
+  if (!success){
+    free_map_release(sector, 1);
+    return NULL;
+  }
   return inode;  
 }
 
@@ -136,8 +134,7 @@ lookup (const struct dir *dir, const char *name,
    On success, sets *INODE to an inode for the file, otherwise to
    a null pointer.  The caller must close *INODE. */
 bool
-dir_lookup (const struct dir *dir, const char *name,
-            struct inode **inode) 
+dir_lookup (const struct dir *dir, const char *name, struct inode **inode) 
 {
   struct dir_entry e;
 

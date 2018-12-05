@@ -15,9 +15,10 @@
 struct inode_disk
   {
     block_sector_t start;               /* First data sector. */
+    enum inode_type type;                /* FILE_INODE or DIR_INODE */
     off_t length;                       /* File size in bytes. */
     unsigned magic;                     /* Magic number. */
-    uint32_t unused[125];               /* Not used. */
+    uint32_t unused[124];               /* Not used. */
   };
 
 /* Returns the number of sectors to allocate for an inode SIZE
@@ -70,7 +71,7 @@ inode_init (void)
    Returns true if successful.
    Returns false if memory or disk allocation fails. */
 bool
-inode_create (block_sector_t sector, off_t length)
+inode_create (block_sector_t sector, off_t length, enum inode_type type)
 {
   struct inode_disk *disk_inode = NULL;
   bool success = false;
@@ -87,6 +88,7 @@ inode_create (block_sector_t sector, off_t length)
       size_t sectors = bytes_to_sectors (length);
       disk_inode->length = length;
       disk_inode->magic = INODE_MAGIC;
+      disk_inode->type = type;
       if (free_map_allocate (sectors, &disk_inode->start)) 
         {
           block_write (fs_device, sector, disk_inode);
@@ -150,6 +152,13 @@ inode_reopen (struct inode *inode)
   return inode;
 }
 
+/* Returns the type of INODE. */
+enum inode_type
+inode_get_type (const struct inode *inode)
+{
+  //TODO: make it read from cache, inode->data shouldn't exist once cache is done
+  return inode->data.type;
+}
 /* Returns INODE's inode number. */
 block_sector_t
 inode_get_inumber (const struct inode *inode)
