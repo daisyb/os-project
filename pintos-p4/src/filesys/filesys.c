@@ -35,7 +35,7 @@ filesys_init (bool format)
    file name part.
    Returns 1 if successful, 0 at end of string, -1 for a too-long
    file name part. */
-UNUSED static int
+static int
 get_next_part (char part[NAME_MAX], const char **srcp)
 {
   const char *src = *srcp;
@@ -69,20 +69,45 @@ get_next_part (char part[NAME_MAX], const char **srcp)
    Returns true if successful, false on failure.
    Stores the directory corresponding to the name into *DIRP,
    and the file name part into BASE_NAME. */
-UNUSED static bool
+static bool
 resolve_name_to_entry (const char *name,
                        struct dir **dirp, char base_name[NAME_MAX + 1])
 {
-  // ...
+
+  struct thread *t = thread_current();
+  *dirp = *name == '/'? dir_open_root() : t->working_dir;
+  if (!strcmp(name, "")) return false;
+  const char **namep = &name;
+  struct inode *inode = NULL;
+  int value;
+  while((value = get_next_part(base_name, namep)) && **namep != '\0'){
+    if (value == -1) return false;
+    if (!dir_lookup(*dirp, base_name, &inode) 
+        || inode_get_type(inode) == FILE_INODE){ 
+      return false;
+    }
+    if (inode != NULL){
+      if (*dirp != t->working_dir)
+        dir_close(*dirp);
+      *dirp = dir_open(inode);
+    }
+  }
+  return true;
 }
 
 /* Resolves relative or absolute file NAME to an inode.
    Returns an inode if successful, or a null pointer on failure.
    The caller is responsible for closing the returned inode. */
-UNUSED static struct inode *
+static struct inode *
 resolve_name_to_inode (const char *name)
 {
-  // ...
+  struct inode *inode = NULL;
+  struct dir *dirp;
+  char base_name[NAME_MAX + 1] = ".";
+  if (resolve_name_to_entry(name, &dirp, base_name)){
+    dir_lookup(dirp, base_name, &inode);
+  }
+  return inode;
 }
 
 /* Shuts down the file system module, writing any unwritten data
@@ -92,23 +117,32 @@ filesys_done (void)
 {
   free_map_close ();
 }
-
+
 /* Creates a file named NAME with the given INITIAL_SIZE.
    Returns true if successful, false otherwise.
    Fails if a file named NAME already exists,
    or if internal memory allocation fails. */
 bool
-filesys_create (const char *name, off_t initial_size) 
+filesys_create (const char *name, off_t initial_size, enum inode_type type) 
 {
   block_sector_t inode_sector = 0;
-  struct dir *dir = dir_open_root ();
-  bool success = (dir != NULL
-                  && free_map_allocate (1, &inode_sector)
-                  && inode_create (inode_sector, initial_size)
-                  && dir_add (dir, name, inode_sector));
+  struct dir *dir;
+  char base_name[NAME_MAX + 1];
+  bool success = (resolve_name_to_entry(name, &dir, base_name) 
+                  && dir
+                  && free_map_allocate(1, &inode_sector));
+  if (type == DIR_INODE)
+    success = success && dir_create(inode_sector, dir_get_inumber(dir));
+  else {
+    success = success && inode_create(inode_sector, initial_size, type);
+  }  
+  success = success && dir_add(dir, base_name, inode_sector);
+
   if (!success && inode_sector != 0) 
     free_map_release (inode_sector, 1);
-  dir_close (dir);
+  
+  if (dir != thread_current()->working_dir)
+    dir_close (dir);
 
   return success;
 }

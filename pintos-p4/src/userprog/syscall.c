@@ -109,7 +109,7 @@ static void syscall_handler (struct intr_frame *f){
   }
   if (i == num_handlers){
     printf("Unsupported syscall: %d\n", call_nr);
-    return;
+    sys_exit(-1);
   }
 
   struct handler_entry syscall = handlers[i];
@@ -205,7 +205,7 @@ int sys_create (const char *file, unsigned initial_size){
 
   char *kfile = copy_in_string (file);
   lock_acquire (&filesys_lock);
-  int create_try = filesys_create (kfile, initial_size);
+  int create_try = filesys_create (kfile, initial_size, FILE_INODE);
   lock_release (&filesys_lock);
   palloc_free_page (kfile);
   return create_try;
