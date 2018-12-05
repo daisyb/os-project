@@ -2,10 +2,13 @@
 #include <debug.h>
 #include <stdio.h>
 #include <string.h>
+#include "filesys/cache.h"
 #include "filesys/file.h"
 #include "filesys/free-map.h"
 #include "filesys/inode.h"
 #include "filesys/directory.h"
+#include "threads/thread.h"
+#include "threads/malloc.h"
 
 /* Partition that contains the file system. */
 struct block *fs_device;
@@ -22,6 +25,7 @@ filesys_init (bool format)
     PANIC ("No file system device found, can't initialize file system.");
 
   inode_init ();
+  cache_init ();
   free_map_init ();
 
   if (format) 
@@ -35,6 +39,7 @@ filesys_init (bool format)
 void
 filesys_done (void) 
 {
+  cache_flush ();
   free_map_close ();
 }
 
