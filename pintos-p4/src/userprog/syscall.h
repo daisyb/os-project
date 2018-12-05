@@ -23,5 +23,10 @@ int sys_filesize (int handle);
 int sys_read (int handle, void *buffer, unsigned size);
 unsigned tell (int handle);
 void seek (int handle, unsigned position);
+bool sys_chdir(const char *dir);
+bool sys_mkdir(const char *dir);
+bool sys_readdir (int fd, char *name);
+bool sys_isdir (int fd);
+int sys_inumber (int fd);
 
 #endif /* userprog/syscall.h */

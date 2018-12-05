@@ -59,7 +59,7 @@ dir_open (struct inode *inode)
   if (inode != NULL && dir != NULL)
     {
       dir->inode = inode;
-      dir->pos = 0;
+      dir->pos = sizeof(struct dir_entry) * 2; //skip "." and ".."
       return dir;
     }
   else
@@ -184,7 +184,6 @@ dir_add (struct dir *dir, const char *name, block_sector_t inode_sector)
   /* Check that NAME is not in use. */
   if (lookup (dir, name, NULL, NULL))
     goto done;
-
   /* Set OFS to offset of free slot.
      If there are no free slots, then it will be set to the
      current end-of-file.
@@ -224,6 +223,7 @@ dir_remove (struct dir *dir, const char *name)
   if (!strcmp(name, ".") || !strcmp(name, ".."))
     return false;
 
+
   //TODO: lock inode
   /* Find directory entry. */
   if (!lookup (dir, name, &e, &ofs))
@@ -234,7 +234,12 @@ dir_remove (struct dir *dir, const char *name)
   if (inode == NULL)
     goto done;
 
-  //TODO Verift that its not an in-use or empty dir
+  if (!dir_is_empty(inode))
+    goto done;
+
+  /* Check if currently open elsewhere */
+  if (inode_open_cnt(inode) > 2)
+    goto done;
 
   /* Erase directory entry. */
   e.in_use = false;
@@ -250,6 +255,16 @@ dir_remove (struct dir *dir, const char *name)
   return success;
 }
 
+static bool 
+dir_is_empty(struct inode *i){
+  struct dir *dir = dir_open(i);
+  char name[NAME_MAX + 1];
+  int success = !dir_readdir(dir, name);
+
+  free(dir);
+  return success;
+}
+
 /* Reads the next directory entry in DIR and stores the name in
    NAME.  Returns true if successful, false if the directory
    contains no more entries. */
@@ -261,7 +276,7 @@ dir_readdir (struct dir *dir, char name[NAME_MAX + 1])
   while (inode_read_at (dir->inode, &e, sizeof e, dir->pos) == sizeof e) 
     {
       dir->pos += sizeof e;
-      if (e.in_use) //TODO: extra conditional
+      if (e.in_use && strcmp(e.name, ".") && strcmp(e.name, ".."))
         {
           //TODO: lock inode
           strlcpy (name, e.name, NAME_MAX + 1);

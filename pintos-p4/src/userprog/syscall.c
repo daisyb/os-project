@@ -91,8 +91,13 @@ struct handler_entry handlers[] = {
   {SYS_FILESIZE, 1, (handler_function)sys_filesize},
   {SYS_READ, 3, (handler_function)sys_read},
   {SYS_SEEK, 2, (handler_function)seek},
-  {SYS_TELL, 1, (handler_function)tell}
-};
+  {SYS_TELL, 1, (handler_function)tell},
+  {SYS_CHDIR, 1, (handler_function)sys_chdir},
+  {SYS_MKDIR, 1, (handler_function)sys_mkdir},
+  {SYS_READDIR, 2, (handler_function)sys_readdir},
+  {SYS_ISDIR, 1, (handler_function)sys_isdir},
+  {SYS_INUMBER, 1, (handler_function)sys_inumber}
+  };
 
 
 #define num_handlers (sizeof(handlers) / sizeof(struct handler_entry))
@@ -354,6 +359,47 @@ void seek (int handle, unsigned position){
   lock_release (&filesys_lock);
 }
 
+bool sys_chdir(const char *dir){
+  lock_acquire(&filesys_lock);
+  int success = filesys_chdir(dir);
+  lock_release(&filesys_lock);
+  return success;
+}
+
+bool sys_mkdir(const char *dir){
+  lock_acquire(&filesys_lock);
+  int success = filesys_create(dir, 0, DIR_INODE);
+  lock_release(&filesys_lock);
+  return success;
+}
+
+bool sys_readdir (int handle, char *name){
+  struct file_descriptor *fd = lookup_fd (handle);
+  if (fd->type != DIR_INODE) return false;
+  return dir_readdir(fd->data.dir, name);
+}
+
+bool sys_isdir (int handle){
+  struct file_descriptor *fd = lookup_fd (handle);
+  if (!fd) return false;
+  return fd->type == DIR_INODE;
+}
+
+int sys_inumber (int handle){
+  struct file_descriptor *fd = lookup_fd (handle);
+  if (!fd) sys_exit(-1);
+  int sector = -1;
+  switch(fd->type){
+  case FILE_INODE:
+    sector = file_get_inumber(fd->data.file);
+    break;
+  case DIR_INODE:
+    sector = dir_get_inumber(fd->data.dir);
+    break;
+  }
+  return sector;
+}
+
 /* Checks whether a user pointer is valid */
 static void is_valid_pointer (const void *p){
   if (!p ||
@@ -362,3 +408,4 @@ static void is_valid_pointer (const void *p){
     sys_exit (-1);
   }
 }
+

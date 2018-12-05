@@ -160,7 +160,17 @@ filesys_open (const char *name)
 
 /* Change current directory to NAME.
    Return true if successful, false on failure. */
+bool
+filesys_chdir (const char *name)
+{
+  struct thread *t = thread_current();
+  struct inode *inode = resolve_name_to_inode(name);
+  if (!inode) return false;
+  dir_close(t->working_dir);
+  t->working_dir = dir_open(inode);
+  return true;
 }
+
 
 /* Deletes the file named NAME.
    Returns true if successful, false on failure.
@@ -169,13 +179,16 @@ filesys_open (const char *name)
 bool
 filesys_remove (const char *name) 
 {
-  struct dir *dir = dir_open_root ();
-  bool success = dir != NULL && dir_remove (dir, name);
-  dir_close (dir); 
+  struct dir *dir;
+  char base_name[NAME_MAX + 1];
 
+  bool success = (resolve_name_to_entry(name, &dir, base_name) 
+                  && dir != NULL 
+                  && dir_remove (dir, base_name));
+  dir_close (dir); 
   return success;
 }
-
+
 /* Formats the file system. */
 static void
 do_format (void)
