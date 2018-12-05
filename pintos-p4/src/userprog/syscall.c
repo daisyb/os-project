@@ -224,9 +224,9 @@ int sys_open (const char *file){
   is_valid_pointer (file);
   char *kfile = copy_in_string (file);
   lock_acquire (&filesys_lock);
-  struct file *open_try = filesys_open (kfile);
+  struct inode *open_try = filesys_open (kfile);
+  lock_release (&filesys_lock);
   if (!open_try){
-    lock_release (&filesys_lock);
     return -1;
   }
   struct file_descriptor *new_fd = (struct file_descriptor*) malloc (sizeof(struct file_descriptor));

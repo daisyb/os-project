@@ -148,21 +148,18 @@ filesys_create (const char *name, off_t initial_size, enum inode_type type)
 }
 
 /* Opens the file with the given NAME.
-   Returns the new file if successful or a null pointer
+   Returns the inode if successful or a null pointer
    otherwise.
    Fails if no file named NAME exists,
    or if an internal memory allocation fails. */
-struct file *
+struct inode *
 filesys_open (const char *name)
 {
-  struct dir *dir = dir_open_root ();
-  struct inode *inode = NULL;
+  return resolve_name_to_inode(name);
+}
 
-  if (dir != NULL)
-    dir_lookup (dir, name, &inode);
-  dir_close (dir);
-
-  return file_open (inode);
+/* Change current directory to NAME.
+   Return true if successful, false on failure. */
 }
 
 /* Deletes the file named NAME.

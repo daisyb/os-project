@@ -245,7 +245,7 @@ load (char *cmdline, void (**eip) (void), void **esp)
   char *file_name = strtok_r(cmdline, " ", &args);
 
   lock_acquire (&filesys_lock);
-  file = filesys_open (file_name);
+  file = file_open(filesys_open (file_name));
   lock_release (&filesys_lock);
   t->process->executable = file;
   if (file == NULL) 
