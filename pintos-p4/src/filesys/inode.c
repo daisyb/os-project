@@ -3,6 +3,7 @@
 #include <debug.h>
 #include <round.h>
 #include <string.h>
+#include <stdio.h>
 #include "filesys/cache.h"
 #include "filesys/filesys.h"
 #include "filesys/free-map.h"
@@ -205,6 +206,9 @@ inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset)
   off_t bytes_read = 0;
   struct cache_block *b;
 
+  if (inode_length (inode) < offset)
+    return bytes_read;
+
   while (size > 0) 
     {
       /* Disk sector to read, starting byte offset within sector. */
@@ -224,7 +228,6 @@ inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset)
       b = get_block (sector_idx);
       memcpy (buffer + bytes_read, (uint8_t *) &b->data + sector_ofs, chunk_size);
       b->clock_bit = true;
-
       size -= chunk_size;
       offset += chunk_size;
       bytes_read += chunk_size;
@@ -238,9 +241,7 @@ inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset)
    (Normally a write at end of file would extend the inode, but
    growth is not yet implemented.) */
 off_t
-inode_write_at (struct inode *inode, const void *buffer_, off_t size,
-                off_t offset) 
-{
+inode_write_at (struct inode *inode, const void *buffer_, off_t size, off_t offset){
   const uint8_t *buffer = buffer_;
   off_t bytes_written = 0;
   struct cache_block *b;
@@ -252,7 +253,9 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
     {
       /* Sector to write, starting byte offset within sector. */
       block_sector_t sector_idx = byte_to_sector (inode, offset);
+      //printf("sector = %d\n", sector_idx);
       int sector_ofs = offset % BLOCK_SECTOR_SIZE;
+      //printf("offset = %d\n", sector_ofs);
 
       /* Bytes left in inode, bytes left in sector, lesser of the two. */
       off_t inode_left = inode_length (inode) - offset;
@@ -263,18 +266,16 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
       int chunk_size = size < min_left ? size : min_left;
       if (chunk_size <= 0)
         break;
-
+      
       b = get_block (sector_idx);
       memcpy ((uint8_t *) &b->data + sector_ofs, buffer + bytes_written, chunk_size);
-      b->clock_bit = true;    
       b->dirty = true;  
-
-      /* Advance. */
+      b->clock_bit = true;
       size -= chunk_size;
       offset += chunk_size;
       bytes_written += chunk_size;
     }
-
+  
   return bytes_written;
 }
 
