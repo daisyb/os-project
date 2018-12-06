@@ -90,11 +90,24 @@ dir_reopen (struct dir *dir)
 void
 dir_close (struct dir *dir) 
 {
-  if (dir != NULL)
+  struct thread* t = thread_current();
+  if (dir != NULL && dir != t->working_dir)
     {
       inode_close (dir->inode);
       free (dir);
     }
+}
+
+/* Destroys current proccess's working directory
+   and frees associated resources. */
+void
+dir_close_working_dir(){
+  struct dir *dir = thread_current()->working_dir;
+  if (dir != NULL)
+    {
+      inode_close (dir->inode);
+      free (dir);
+    }  
 }
 
 /* Returns the inode encapsulated by DIR. */

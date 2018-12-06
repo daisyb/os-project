@@ -87,8 +87,7 @@ resolve_name_to_entry (const char *name,
       return false;
     }
     if (inode != NULL){
-      if (*dirp != t->working_dir)
-        dir_close(*dirp);
+      dir_close(*dirp);
       *dirp = dir_open(inode);
     }
   }
@@ -102,11 +101,12 @@ static struct inode *
 resolve_name_to_inode (const char *name)
 {
   struct inode *inode = NULL;
-  struct dir *dirp;
+  struct dir *dir;
   char base_name[NAME_MAX + 1] = ".";
-  if (resolve_name_to_entry(name, &dirp, base_name)){
-    dir_lookup(dirp, base_name, &inode);
+  if (resolve_name_to_entry(name, &dir, base_name)){
+    dir_lookup(dir, base_name, &inode);
   }
+  dir_close(dir);
   return inode;
 }
 
@@ -141,9 +141,7 @@ filesys_create (const char *name, off_t initial_size, enum inode_type type)
   if (!success && inode_sector != 0) 
     free_map_release (inode_sector, 1);
   
-  if (dir != thread_current()->working_dir)
-    dir_close (dir);
-
+  dir_close (dir);
   return success;
 }
 
@@ -166,7 +164,7 @@ filesys_chdir (const char *name)
   struct thread *t = thread_current();
   struct inode *inode = resolve_name_to_inode(name);
   if (!inode) return false;
-  dir_close(t->working_dir);
+  dir_close_working_dir();
   t->working_dir = dir_open(inode);
   return true;
 }
