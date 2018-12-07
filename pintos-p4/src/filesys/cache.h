@@ -5,15 +5,18 @@
 #include "threads/synch.h"
 #include "devices/block.h"
 
-struct list cache;
-struct lock cache_lock;
 struct cache_block {
   block_sector_t sector;
   uint8_t data[BLOCK_SECTOR_SIZE];
   bool dirty;
   bool clock_bit;
-  struct list_elem elem;
 };
+
+#define INVALID_SECTOR ((block_sector_t) -1)
+#define CACHE_CNT 64
+struct cache_block cache[CACHE_CNT];
+struct lock cache_lock;
+
 
 void cache_init (void);
 struct cache_block *lookup_block (block_sector_t sector);

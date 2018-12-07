@@ -204,12 +204,15 @@ inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset)
 {
   uint8_t *buffer = buffer_;
   off_t bytes_read = 0;
+  uint8_t test_buffer[BLOCK_SECTOR_SIZE];
   //uint8_t *bounce = NULL;
 
   while (size > 0){
     /* Disk sector to read, starting byte offset within sector. */
     block_sector_t sector_idx = byte_to_sector (inode, offset);
+    printf("SECTOR = %d\n", sector_idx);
     int sector_ofs = offset % BLOCK_SECTOR_SIZE;
+    printf("OFFSET = %d\n", sector_ofs);
     
     /* Bytes left in inode, bytes left in sector, lesser of the two. */
     off_t inode_left = inode_length (inode) - offset;
@@ -218,11 +221,26 @@ inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset)
     
     /* Number of bytes to actually copy out of this sector. */
     int chunk_size = size < min_left ? size : min_left;
+    printf("CHUNKSIZE = %d\n", chunk_size);
     if (chunk_size <= 0)
       break;
 
     struct cache_block *b = get_block (sector_idx);
-    memcpy (buffer + bytes_read, (uint8_t *) &b->data + sector_ofs, chunk_size);
+    int i;
+    printf("back in inode_read_at\n");
+    memcpy (buffer + bytes_read, b->data + sector_ofs, chunk_size);
+
+    block_read (fs_device, sector_idx, test_buffer);
+    for (i=0; i<BLOCK_SECTOR_SIZE; i++){
+      printf("%d", test_buffer[i]);
+    }
+    printf("\n\n");
+    for (i=0; i<BLOCK_SECTOR_SIZE; i++){
+      printf("%d", buffer[i]);
+    }
+    printf("\n\n");
+    
+    ASSERT (!memcmp (b->data, test_buffer, chunk_size));
 
     /*if (sector_ofs == 0 && chunk_size == BLOCK_SECTOR_SIZE){
       block_read (fs_device, sector_idx, buffer + bytes_read);
@@ -295,7 +313,7 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
       }*/
 
     struct cache_block *b = get_block (sector_idx);
-    memcpy ((uint8_t *) &b->data + sector_ofs, buffer + bytes_written, chunk_size);
+    memcpy ((uint8_t *) b->data + sector_ofs, buffer + bytes_written, chunk_size);
     
     /* Advance. */
     size -= chunk_size;
