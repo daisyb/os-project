@@ -1,3 +1,4 @@
+
 #include <debug.h>
 #include <string.h>
 #include <stdio.h>
@@ -6,12 +7,19 @@
 #include "threads/malloc.h"
 #include "threads/thread.h"
 
+static int hand;
+
+static void cache_block_lock(struct cache_block *b);
+static bool cache_block_try_lock(struct cache_block *b);
+
 void cache_init (void){
   int i;
   for (i=0; i<CACHE_CNT; i++){
     cache[i].sector = INVALID_SECTOR;
+    lock_init(&cache[i].block_lock);
   }
   lock_init (&cache_lock);
+  hand = 0;
 }
 
 struct cache_block *lookup_block (block_sector_t sector){
@@ -27,24 +35,26 @@ struct cache_block *lookup_block (block_sector_t sector){
 }
 
 struct cache_block *cache_evict (void){
-  struct cache_block *b = NULL;
   int i;
   for (i=0; i<CACHE_CNT; i++){
-    b = &cache[i];
-    if (b->sector == INVALID_SECTOR)
-      return b;
-  }
-  for (i=0; i<CACHE_CNT; i++){
-    b = &cache[i];
-    if (b->clock_bit)
-      b->clock_bit = false;
-    else {
-      if (b->dirty)
-	block_write (fs_device, b->sector, b->data);
-      return b;
+    if (cache[i].sector == INVALID_SECTOR){
+      return &cache[i];
     }
   }
-  if (b->dirty)
+  
+  struct cache_block *b = NULL;
+  struct cache_block *cur = NULL;
+  while(!b){
+    cur = &cache[hand++];
+    if (!cur->clock_bit){
+      b = cur;
+    } else {
+      cur->clock_bit = false;
+    }
+    if (hand >= CACHE_CNT)
+      hand = 0;
+  }
+  if (b->dirty && b->sector != INVALID_SECTOR)
     block_write (fs_device, b->sector, b->data);
   return b;
 }
@@ -57,20 +67,42 @@ void cache_fill (struct cache_block *b, block_sector_t sector){
 }
 
 struct cache_block *get_block (block_sector_t sector){
-  lock_acquire (&cache_lock);
   struct cache_block *b = lookup_block (sector);
   if (b){
+    cache_block_lock(b);
     b->clock_bit = true;
-    lock_release (&cache_lock);
     return b;
   }
   b = cache_evict ();
-  cache_fill (b, sector);
-  
   if (!b)
     PANIC ("Buffer cache failure.");
-  lock_release (&cache_lock);
+  cache_block_lock(b);
+  cache_fill (b, sector);
   return b;
+}
+
+/* Marks block B as dirty, so that it will be written back to
+   disk before eviction.
+   The caller must have a read or write lock on B,
+   and B must be up-to-date. */
+void
+cache_dirty (struct cache_block *b)
+{
+  ASSERT(lock_held_by_current_thread(&b->block_lock));
+  b->dirty = true;
+}
+
+static void cache_block_lock(struct cache_block *b){
+  lock_acquire(&b->block_lock);  
+}
+
+UNUSED static bool cache_block_try_lock(struct cache_block *b){
+  return lock_try_acquire(&b->block_lock);
+}
+
+void cache_unlock(struct cache_block *b){
+  ASSERT(lock_held_by_current_thread(&b->block_lock));
+  lock_release(&b->block_lock);  
 }
 
 void cache_flush (void){
@@ -81,7 +113,7 @@ void cache_flush (void){
     b = &cache[i];
     if (b->dirty)
       block_write (fs_device, b->sector, b->data);
-    free (b);
+    b->sector = INVALID_SECTOR;
   }
   lock_release (&cache_lock);
 }
