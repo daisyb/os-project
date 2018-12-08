@@ -40,6 +40,7 @@ struct inode
     int open_cnt;                       /* Number of openers. */
     bool removed;                       /* True if deleted, false otherwise. */
     int deny_write_cnt;                 /* 0: writes ok, >0: deny writes. */
+    struct lock lock;                   /* Protects the inode. */
     struct inode_disk data;             /* Inode content. */
   };
 
@@ -146,6 +147,7 @@ inode_open (block_sector_t sector)
   inode->open_cnt = 1;
   inode->deny_write_cnt = 0;
   inode->removed = false;
+  lock_init(&inode->lock);
   block_read (fs_device, inode->sector, &inode->data);
   return inode;
 }
@@ -339,4 +341,18 @@ inode_open_cnt (const struct inode *inode)
   lock_release (&open_inodes_lock);
 
   return open_cnt;
+}
+
+/* Locks INODE. */
+void
+inode_lock (struct inode *inode)
+{
+  lock_acquire (&inode->lock);
+}
+
+/* Releases INODE's lock. */
+void
+inode_unlock (struct inode *inode)
+{
+  lock_release (&inode->lock);
 }

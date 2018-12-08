@@ -157,19 +157,20 @@ lookup (const struct dir *dir, const char *name,
    On success, sets *INODE to an inode for the file, otherwise to
    a null pointer.  The caller must close *INODE. */
 bool
-dir_lookup (const struct dir *dir, const char *name, struct inode **inode) 
+dir_lookup (const struct dir *dir, const char *name,
+            struct inode **inode)
 {
   struct dir_entry e;
+  bool ok;
 
   ASSERT (dir != NULL);
   ASSERT (name != NULL);
 
-  //TODO: needs inode lock
-  if (lookup (dir, name, &e, NULL))
-    *inode = inode_open (e.inode_sector);
-  else
-    *inode = NULL;
+  inode_lock (dir->inode);
+  ok = lookup (dir, name, &e, NULL);
+  inode_unlock (dir->inode);
 
+  *inode = ok ? inode_open (e.inode_sector) : NULL;
   return *inode != NULL;
 }
 
@@ -193,8 +194,8 @@ dir_add (struct dir *dir, const char *name, block_sector_t inode_sector)
   if (*name == '\0' || strlen (name) > NAME_MAX)
     return false;
 
-  //TODO: inode lock
   /* Check that NAME is not in use. */
+  inode_lock(dir->inode);
   if (lookup (dir, name, NULL, NULL))
     goto done;
   /* Set OFS to offset of free slot.
@@ -216,6 +217,7 @@ dir_add (struct dir *dir, const char *name, block_sector_t inode_sector)
   success = inode_write_at (dir->inode, &e, sizeof e, ofs) == sizeof e;
 
  done:
+  inode_unlock(dir->inode);
   return success;
 }
 
@@ -237,8 +239,8 @@ dir_remove (struct dir *dir, const char *name)
     return false;
 
 
-  //TODO: lock inode
   /* Find directory entry. */
+  inode_lock(dir->inode);
   if (!lookup (dir, name, &e, &ofs))
     goto done;
 
@@ -264,6 +266,7 @@ dir_remove (struct dir *dir, const char *name)
   success = true;
 
  done:
+  inode_unlock(dir->inode);
   inode_close (inode);
   return success;
 }
@@ -286,15 +289,17 @@ dir_readdir (struct dir *dir, char name[NAME_MAX + 1])
 {
   struct dir_entry e;
 
+  inode_lock(dir->inode);
   while (inode_read_at (dir->inode, &e, sizeof e, dir->pos) == sizeof e) 
     {
       dir->pos += sizeof e;
       if (e.in_use && strcmp(e.name, ".") && strcmp(e.name, ".."))
         {
-          //TODO: lock inode
           strlcpy (name, e.name, NAME_MAX + 1);
+          inode_unlock(dir->inode);
           return true;
         } 
     }
+  inode_unlock(dir->inode);
   return false;
 }
