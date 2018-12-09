@@ -224,11 +224,9 @@ off_t inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offse
     if (chunk_size <= 0)
       break;
     
-    lock_acquire (&cache_lock);
     struct cache_block *b = get_block (sector_idx);
-
     memcpy (buffer + bytes_read, (uint8_t *) b->data + sector_ofs, chunk_size);
-    cache_unlock(b);
+    cache_block_unlock(b);
     
     /* Advance. */
     size -= chunk_size;
@@ -263,18 +261,16 @@ off_t inode_write_at (struct inode *inode, const void *buffer_, off_t size, off_
     int chunk_size = size < min_left ? size : min_left;
     if (chunk_size <= 0)
 
-    lock_acquire (&cache_lock);
     struct cache_block *b = get_block (sector_idx);
     memcpy ((uint8_t *) &b->data + sector_ofs, buffer + bytes_written, chunk_size);
     cache_dirty(b);
-    cache_unlock(b);
+    cache_block_unlock(b);
 
     /* Advance. */
     size -= chunk_size;
     offset += chunk_size;
     bytes_written += chunk_size;
   }
-  
   return bytes_written;
 }
 
