@@ -73,11 +73,14 @@ void
 free_map_create (void) 
 {
   /* Create inode. */
-  if (!inode_create (FREE_MAP_SECTOR, FILE_INODE))
+  struct inode *inode;
+  if (!(inode = inode_create (FREE_MAP_SECTOR, FILE_INODE)))
     PANIC ("free map creation failed");
   int size = bitmap_file_size (free_map);
+  if (!extend_file (inode, size))
+    PANIC ("free map extension failed");
   /* Write bitmap to file. */
-  free_map_file = file_open (inode_open (FREE_MAP_SECTOR));
+  free_map_file = file_open (inode);
   if (free_map_file == NULL)
     PANIC ("can't open free map");
   if (!bitmap_write (free_map, free_map_file))

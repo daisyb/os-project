@@ -137,7 +137,9 @@ filesys_create (const char *name, off_t initial_size, enum inode_type type)
   if (type == DIR_INODE)
     success = success && dir_create(inode_sector, dir_get_inumber(dir));
   else {
-    success = success && inode_create(inode_sector, type);
+    struct inode *inode = inode_create (inode_sector, type);
+    success = success && inode && extend_file(inode, initial_size);
+    inode_close (inode);
   }  
   success = success && dir_add(dir, base_name, inode_sector);
 
