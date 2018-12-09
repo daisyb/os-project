@@ -181,6 +181,44 @@ void inode_remove (struct inode *inode){
   inode->removed = true;
 }
 
+block_sector_t byte_to_sector (const struct inode *inode, off_t pos){
+  ASSERT (inode != NULL);
+  struct cache_block *b = get_block (inode->sector);
+  struct inode_disk *id = (struct inode_disk *) b->data;
+  cache_block_unlock (b);
+
+  /* Not sure if this will need to be changed for seeks past EOF. */
+  ASSERT (pos < id->length);
+
+  block_sector_t sector = pos / BLOCK_SECTOR_SIZE;
+  /* In a direct block. */
+  if (sector < DIRECT_CNT){
+    return id->sectors[sector];
+  }
+  sector -= DIRECT_CNT;
+  /* In an indirect block -- currently implemented for only having 1 */
+  if (sector < PTRS_PER_SECTOR){
+    struct cache_block *b2 = get_block (id->sectors[DIRECT_CNT]);
+    struct inode_disk *id2 = (struct inode_disk *) b2->data;
+    cache_block_unlock (b2);
+    return id2->sectors[sector];
+  }
+  sector -= PTRS_PER_SECTOR;
+  /* In a dbl-indirect block -- currently implemented for only having 1 */
+  if (sector < PTRS_PER_SECTOR * PTRS_PER_SECTOR){
+    struct cache_block *b2 = get_block (id->sectors[DIRECT_CNT + INDIRECT_CNT]);
+    struct inode_disk *id2 = (struct inode_disk *) b2->data;
+    cache_block_unlock (b2);
+    block_sector_t next_sector = sector / PTRS_PER_SECTOR;
+    struct cache_block *b3 = get_block (id2->sectors[next_sector]);
+    struct inode_disk *id3 = (struct inode_disk *) b3->data;
+    cache_block_unlock (b3);
+    sector -= next_sector * PTRS_PER_SECTOR;
+    return id3->sectors[sector];
+  }
+  PANIC ("byte-to-sector failed.");
+}
+
 /* Reads SIZE bytes from INODE into BUFFER, starting at position OFFSET.
    Returns the number of bytes actually read, which may be less
    than SIZE if an error occurs or end of file is reached. */
