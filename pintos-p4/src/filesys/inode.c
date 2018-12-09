@@ -64,19 +64,15 @@ static struct lock open_inodes_lock;
 static void deallocate_inode (const struct inode *);
 
 /* Initializes the inode module. */
-void
-inode_init (void) 
-{
+void inode_init (void){
   list_init (&open_inodes);
   lock_init (&open_inodes_lock);
 }
 
-/* Initializes an inode of the given TYPE, writes the new inode
-   to sector SECTOR on the file system device, and returns the
-   inode thus created. Returns a null pointer if unsuccessful,
-   in which case SECTOR is released in the free map. */
-struct inode_disk *inode_create (block_sector_t sector, enum inode_type type){
+/* Creates a new inode_disk of length 0, stored in sector SECTOR. */
+bool inode_create (block_sector_t sector, enum inode_type type){
   struct inode_disk *disk_inode = NULL;
+  bool success = false;
 
   ASSERT (sizeof *disk_inode == BLOCK_SECTOR_SIZE);
 
@@ -86,55 +82,30 @@ struct inode_disk *inode_create (block_sector_t sector, enum inode_type type){
     disk_inode->length = 0;
     disk_inode->magic = INODE_MAGIC;
 
-    
+    struct cache_block *b = get_block (sector);
+    memcpy (b->data, disk_inode, BLOCK_SECTOR_SIZE);
+    cache_block_unlock (b);
+    free (disk_inode);
+    success = true;
   }
+  return success;
 }
 
-
-/* Initializes an inode with LENGTH bytes of data and
-   writes the new inode to sector SECTOR on the file system
-   device.
-   Returns true if successful.
-   Returns false if memory or disk allocation fails. */
-bool inode_create (block_sector_t sector, off_t length){
-      size_t sectors = bytes_to_sectors (length);
-      if (free_map_allocate (sectors, &disk_inode->start)) 
-        {
-          block_write (fs_device, sector, disk_inode);
-          if (sectors > 0) 
-            {
-              static char zeros[BLOCK_SECTOR_SIZE];
-              size_t i;
-              
-              for (i = 0; i < sectors; i++) 
-                block_write (fs_device, disk_inode->start + i, zeros);
-            }
-          success = true; 
-        } 
-      free (disk_inode);
-}
-
-/* Reads an inode from SECTOR
-   and returns a `struct inode' that contains it.
-   Returns a null pointer if memory allocation fails. */
-struct inode *
-inode_open (block_sector_t sector)
-{
+struct inode *inode_open (block_sector_t sector){
   struct list_elem *e;
   struct inode *inode;
 
   /* Check whether this inode is already open. */
-  for (e = list_begin (&open_inodes); e != list_end (&open_inodes);
-       e = list_next (e)) 
-    {
-      inode = list_entry (e, struct inode, elem);
-      if (inode->sector == sector) 
-        {
-          inode_reopen (inode);
-          return inode; 
-        }
+  for (e = list_begin (&open_inodes); 
+       e != list_end (&open_inodes);
+       e = list_next (e)){
+    inode = list_entry (e, struct inode, elem);
+    if (inode->sector == sector){
+      inode_reopen (inode);
+      return inode; 
     }
-
+  }
+  
   /* Allocate memory. */
   inode = malloc (sizeof *inode);
   if (inode == NULL)
@@ -144,17 +115,17 @@ inode_open (block_sector_t sector)
   list_push_front (&open_inodes, &inode->elem);
   inode->sector = sector;
   inode->open_cnt = 1;
-  inode->deny_write_cnt = 0;
   inode->removed = false;
-  lock_init(&inode->lock);
-  block_read (fs_device, inode->sector, &inode->data);
+  lock_init (&inode->lock);
+  lock_init (&inode->deny_write_lock);
+  cond_init (&inode->no_writers_cond);
+  inode->deny_write_cnt = 0;
+  inode->writer_cnt = 0;
   return inode;
 }
 
 /* Reopens and returns INODE. */
-struct inode *
-inode_reopen (struct inode *inode)
-{
+struct inode *inode_reopen (struct inode *inode){
   if (inode != NULL){
     lock_acquire (&open_inodes_lock);
     inode->open_cnt++;
@@ -164,25 +135,22 @@ inode_reopen (struct inode *inode)
 }
 
 /* Returns the type of INODE. */
-enum inode_type
-inode_get_type (const struct inode *inode)
-{
-  //TODO: make it read from cache, inode->data shouldn't exist once cache is done
-  return inode->data.type;
+enum inode_type inode_get_type (const struct inode *inode){
+  struct cache_block* b = get_block (inode->sector);
+  cache_block_unlock (b);
+  struct inode_disk *id = (struct inode_disk *) b->data;
+  return id->type;
 }
+
 /* Returns INODE's inode number. */
-block_sector_t
-inode_get_inumber (const struct inode *inode)
-{
+block_sector_t inode_get_inumber (const struct inode *inode){
   return inode->sector;
 }
 
 /* Closes INODE and writes it to disk.
    If this was the last reference to INODE, frees its memory.
    If INODE was also a removed inode, frees its blocks. */
-void
-inode_close (struct inode *inode) 
-{
+void inode_close (struct inode *inode){
   /* Ignore null pointer. */
   if (inode == NULL)
     return;
@@ -191,28 +159,24 @@ inode_close (struct inode *inode)
   lock_acquire (&open_inodes_lock);
   int open_cnt = --inode->open_cnt;
   lock_release (&open_inodes_lock);
-  if (open_cnt == 0)
-    {
-      /* Remove from inode list and release lock. */
-      list_remove (&inode->elem);
- 
-      /* Deallocate blocks if removed. */
-      if (inode->removed) 
-        {
-          free_map_release (inode->sector, 1);
-          free_map_release (inode->data.start,
-                            bytes_to_sectors (inode->data.length)); 
-        }
-
-      free (inode); 
+  if (open_cnt == 0){
+    /* Remove from inode list and release lock. */
+    list_remove (&inode->elem);
+    
+    /* Deallocate blocks if removed. */
+    if (inode->removed){
+      free_map_release (inode->sector, 1);
+      free_map_release (inode->data.start,
+			bytes_to_sectors (inode->data.length)); 
     }
+    
+    free (inode); 
+  }
 }
 
 /* Marks INODE to be deleted when it is closed by the last caller who
    has it open. */
-void
-inode_remove (struct inode *inode) 
-{
+void inode_remove (struct inode *inode){
   ASSERT (inode != NULL);
   inode->removed = true;
 }
@@ -241,7 +205,7 @@ off_t inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offse
     
     struct cache_block *b = get_block (sector_idx);
     memcpy (buffer + bytes_read, (uint8_t *) b->data + sector_ofs, chunk_size);
-    cache_block_unlock(b);
+    cache_block_unlock (b);
     
     /* Advance. */
     size -= chunk_size;
@@ -279,7 +243,7 @@ off_t inode_write_at (struct inode *inode, const void *buffer_, off_t size, off_
     struct cache_block *b = get_block (sector_idx);
     memcpy ((uint8_t *) &b->data + sector_ofs, buffer + bytes_written, chunk_size);
     cache_dirty(b);
-    cache_block_unlock(b);
+    cache_block_unlock (b);
 
     /* Advance. */
     size -= chunk_size;
@@ -291,9 +255,7 @@ off_t inode_write_at (struct inode *inode, const void *buffer_, off_t size, off_
 
 /* Disables writes to INODE.
    May be called at most once per inode opener. */
-void
-inode_deny_write (struct inode *inode) 
-{
+void inode_deny_write (struct inode *inode){
   inode->deny_write_cnt++;
   ASSERT (inode->deny_write_cnt <= inode->open_cnt);
 }
@@ -301,25 +263,22 @@ inode_deny_write (struct inode *inode)
 /* Re-enables writes to INODE.
    Must be called once by each inode opener who has called
    inode_deny_write() on the inode, before closing the inode. */
-void
-inode_allow_write (struct inode *inode) 
-{
+void inode_allow_write (struct inode *inode){
   ASSERT (inode->deny_write_cnt > 0);
   ASSERT (inode->deny_write_cnt <= inode->open_cnt);
   inode->deny_write_cnt--;
 }
 
 /* Returns the length, in bytes, of INODE's data. */
-off_t
-inode_length (const struct inode *inode)
-{
-  return inode->data.length;
+off_t inode_length (const struct inode *inode){
+  struct cache_block *b = get_block (inode->sector);
+  cache_block_unlock (b);
+  struct inode_disk *id = (struct inode_disk *) b->data;
+  return id->length;
 }
 
 /* Returns the number of openers. */
-int
-inode_open_cnt (const struct inode *inode)
-{
+int inode_open_cnt (const struct inode *inode){
   int open_cnt;
 
   lock_acquire (&open_inodes_lock);
@@ -330,15 +289,11 @@ inode_open_cnt (const struct inode *inode)
 }
 
 /* Locks INODE. */
-void
-inode_lock (struct inode *inode)
-{
+void inode_lock (struct inode *inode){
   lock_acquire (&inode->lock);
 }
 
 /* Releases INODE's lock. */
-void
-inode_unlock (struct inode *inode)
-{
+void inode_unlock (struct inode *inode){
   lock_release (&inode->lock);
 }
