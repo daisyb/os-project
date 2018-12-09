@@ -477,6 +477,7 @@ init_thread (struct thread *t, const char *name, int priority)
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
   t->magic = THREAD_MAGIC;
+  t->working_dir = NULL;
   list_init(&t->children);
   list_init(&t->fd_list);
   
@@ -649,6 +650,7 @@ thread_add_child_process(tid_t tid)
   struct thread *parent = thread_current();
   struct thread *child = get_thread_by_tid(tid);
   list_push_front(&parent->children, &child->process->elem);
+  child->working_dir = parent->working_dir;
   return child->process->pid;
 }
 

@@ -23,30 +23,35 @@ void cache_init (void){
 }
 
 struct cache_block *lookup_block (block_sector_t sector){
-  struct cache_block *b;
+  struct cache_block *b = NULL;
   int i;
+  lock_acquire(&cache_lock);
   for (i=0; i<CACHE_CNT; i++){
-    b = &cache[i];
-    if (b->sector == sector){
-      return b;
+    if (cache[i].sector == sector){
+      b = &cache[i];
+      cache_block_lock(b);
+      break;
     }
   }
-  return NULL;
+  lock_release(&cache_lock);
+  return b;
 }
 
 struct cache_block *cache_evict (void){
+  struct cache_block *b = NULL;
+  lock_acquire(&cache_lock);
   int i;
   for (i=0; i<CACHE_CNT; i++){
     if (cache[i].sector == INVALID_SECTOR){
-      return &cache[i];
+      b =  &cache[i];
+      cache_block_lock(b);
+      break;
     }
   }
-  
-  struct cache_block *b = NULL;
   struct cache_block *cur = NULL;
   while(!b){
     cur = &cache[hand++];
-    if (!cur->clock_bit){
+    if (!cur->clock_bit && cache_block_try_lock(cur)){
       b = cur;
     } else {
       cur->clock_bit = false;
@@ -54,6 +59,7 @@ struct cache_block *cache_evict (void){
     if (hand >= CACHE_CNT)
       hand = 0;
   }
+  lock_release(&cache_lock);
   if (b->dirty && b->sector != INVALID_SECTOR)
     block_write (fs_device, b->sector, b->data);
   return b;
@@ -69,14 +75,12 @@ void cache_fill (struct cache_block *b, block_sector_t sector){
 struct cache_block *get_block (block_sector_t sector){
   struct cache_block *b = lookup_block (sector);
   if (b){
-    cache_block_lock(b);
     b->clock_bit = true;
     return b;
   }
   b = cache_evict ();
   if (!b)
     PANIC ("Buffer cache failure.");
-  cache_block_lock(b);
   cache_fill (b, sector);
   return b;
 }

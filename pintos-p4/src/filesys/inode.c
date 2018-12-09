@@ -7,6 +7,7 @@
 #include "filesys/filesys.h"
 #include "filesys/free-map.h"
 #include "threads/malloc.h"
+#include "threads/synch.h"
 #include "filesys/cache.h"
 #include "threads/thread.h"
 
@@ -145,6 +146,7 @@ inode_open (block_sector_t sector)
   inode->open_cnt = 1;
   inode->deny_write_cnt = 0;
   inode->removed = false;
+  lock_init(&inode->lock);
   block_read (fs_device, inode->sector, &inode->data);
   return inode;
 }
@@ -153,11 +155,21 @@ inode_open (block_sector_t sector)
 struct inode *
 inode_reopen (struct inode *inode)
 {
-  if (inode != NULL)
+  if (inode != NULL){
+    lock_acquire (&open_inodes_lock);
     inode->open_cnt++;
+    lock_release (&open_inodes_lock);
+  }
   return inode;
 }
 
+/* Returns the type of INODE. */
+enum inode_type
+inode_get_type (const struct inode *inode)
+{
+  //TODO: make it read from cache, inode->data shouldn't exist once cache is done
+  return inode->data.type;
+}
 /* Returns INODE's inode number. */
 block_sector_t
 inode_get_inumber (const struct inode *inode)
@@ -176,7 +188,10 @@ inode_close (struct inode *inode)
     return;
 
   /* Release resources if this was the last opener. */
-  if (--inode->open_cnt == 0)
+  lock_acquire (&open_inodes_lock);
+  int open_cnt = --inode->open_cnt;
+  lock_release (&open_inodes_lock);
+  if (open_cnt == 0)
     {
       /* Remove from inode list and release lock. */
       list_remove (&inode->elem);
@@ -299,4 +314,31 @@ off_t
 inode_length (const struct inode *inode)
 {
   return inode->data.length;
+}
+
+/* Returns the number of openers. */
+int
+inode_open_cnt (const struct inode *inode)
+{
+  int open_cnt;
+
+  lock_acquire (&open_inodes_lock);
+  open_cnt = inode->open_cnt;
+  lock_release (&open_inodes_lock);
+
+  return open_cnt;
+}
+
+/* Locks INODE. */
+void
+inode_lock (struct inode *inode)
+{
+  lock_acquire (&inode->lock);
+}
+
+/* Releases INODE's lock. */
+void
+inode_unlock (struct inode *inode)
+{
+  lock_release (&inode->lock);
 }

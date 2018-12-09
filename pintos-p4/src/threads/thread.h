@@ -5,6 +5,7 @@
 #include <list.h>
 #include <stdint.h>
 #include "filesys/file.h"
+#include "filesys/inode.h"
 #include "synch.h"
 
 /* States in a thread's life cycle. */
@@ -87,9 +88,16 @@ typedef int pid_t;
    blocked state is on a semaphore wait list. */
 
 /* For an individual thread to hold */
+union data_union
+{
+  struct file* file;
+  struct dir* dir;
+};
+
 struct file_descriptor {
   int handle;
-  struct file* file;
+  enum inode_type type;
+  union data_union data;
   struct list_elem elem;
 };
 
@@ -130,6 +138,7 @@ struct thread
     struct process *process;            /* Shared data btwn process and parent, freed by parent */
     struct list fd_list;		/* List of file descriptors. */
 
+    struct dir* working_dir;          /* Inode pointing to a proccesses current directory */
     
 #ifdef USERPROG
     /* Owned by userprog/process.c. */

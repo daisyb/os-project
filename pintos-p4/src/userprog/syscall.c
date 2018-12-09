@@ -8,6 +8,7 @@
 #include "threads/malloc.h"
 #include "threads/palloc.h"
 #include "filesys/filesys.h"
+#include "filesys/directory.h"
 #include "devices/shutdown.h"
 #include "pagedir.h"
 #include "lib/stdbool.h"
@@ -90,8 +91,13 @@ struct handler_entry handlers[] = {
   {SYS_FILESIZE, 1, (handler_function)sys_filesize},
   {SYS_READ, 3, (handler_function)sys_read},
   {SYS_SEEK, 2, (handler_function)seek},
-  {SYS_TELL, 1, (handler_function)tell}
-};
+  {SYS_TELL, 1, (handler_function)tell},
+  {SYS_CHDIR, 1, (handler_function)sys_chdir},
+  {SYS_MKDIR, 1, (handler_function)sys_mkdir},
+  {SYS_READDIR, 2, (handler_function)sys_readdir},
+  {SYS_ISDIR, 1, (handler_function)sys_isdir},
+  {SYS_INUMBER, 1, (handler_function)sys_inumber}
+  };
 
 
 #define num_handlers (sizeof(handlers) / sizeof(struct handler_entry))
@@ -109,7 +115,7 @@ static void syscall_handler (struct intr_frame *f){
   }
   if (i == num_handlers){
     printf("Unsupported syscall: %d\n", call_nr);
-    return;
+    sys_exit(-1);
   }
 
   struct handler_entry syscall = handlers[i];
@@ -152,11 +158,11 @@ int sys_write (int handle, void *usrc_, unsigned size){
   }
   lock_acquire (&filesys_lock);
   struct file_descriptor *fd = lookup_fd(handle);
-  if (!fd) {
+  if (!fd || fd->type != FILE_INODE) {
     lock_release (&filesys_lock);
     sys_exit (-1);
   }
-  bytes = file_write (fd->file, usrc_, size);
+  bytes = file_write (fd->data.file, usrc_, size);
   lock_release (&filesys_lock);
   return bytes;
 }
@@ -205,7 +211,7 @@ int sys_create (const char *file, unsigned initial_size){
 
   char *kfile = copy_in_string (file);
   lock_acquire (&filesys_lock);
-  int create_try = filesys_create (kfile, initial_size);
+  int create_try = filesys_create (kfile, initial_size, FILE_INODE);
   lock_release (&filesys_lock);
   palloc_free_page (kfile);
   return create_try;
@@ -219,54 +225,86 @@ int sys_remove (const char *file){
   return remove_try;
 }
 
-/* Open system call */
-int sys_open (const char *file){
-  is_valid_pointer (file);
-  char *kfile = copy_in_string (file);
-  lock_acquire (&filesys_lock);
-  struct file *open_try = filesys_open (kfile);
-  if (!open_try){
-    lock_release (&filesys_lock);
-    return -1;
-  }
-  struct file_descriptor *new_fd = (struct file_descriptor*) malloc (sizeof(struct file_descriptor));
-  new_fd->handle = get_handle ();
-  new_fd->file = open_try;
-  struct thread *cur = thread_current();
-  list_push_front(&cur->process->fd_list, &new_fd->elem);
-  palloc_free_page (kfile);
-  lock_release (&filesys_lock);
-  return new_fd->handle;
-}
 
 int get_handle (){
   next_fd++;
   return next_fd;
 }
 
+/*
+  Allocates a file_descriptor for inode i
+  adds the fd to the current thread
+  returns handle or -1 if fails
+*/
+static inline int  fd_alloc(struct inode* i){
+  struct file_descriptor *new_fd = (struct file_descriptor*) malloc (sizeof(struct file_descriptor));
+  new_fd->handle = get_handle ();
+  new_fd->type = inode_get_type(i);
+  bool success = false;
+  switch(new_fd->type){
+  case FILE_INODE:
+    new_fd->data.file = file_open(i);
+    success = new_fd->data.file;
+    break;
+  case DIR_INODE:
+    new_fd->data.dir = dir_open(i);
+    success = new_fd->data.dir;
+    break;
+  }
+  if (!success){
+    free(new_fd);
+    return -1;
+  }
+  struct thread *cur = thread_current();
+  list_push_front(&cur->process->fd_list, &new_fd->elem);
+  return new_fd->handle;
+}
+
+/* Open system call */
+int sys_open (const char *file){
+  is_valid_pointer (file);
+  char *kfile = copy_in_string (file);
+  lock_acquire (&filesys_lock);
+  struct inode *open_try = filesys_open (kfile);
+  lock_release (&filesys_lock);
+  if (!open_try){
+    return -1;
+  }
+  int handle = fd_alloc(open_try);
+  palloc_free_page (kfile);
+  return handle;
+}
+
+
 /* Close system call */
 void sys_close (int handle){
   if (handle < 2)
     sys_exit (-1); 
-    lock_acquire (&filesys_lock); 
+  lock_acquire (&filesys_lock); 
   struct file_descriptor *fd = lookup_fd (handle);
-  if (fd){
-    file_close (fd->file);
-    list_remove (&fd->elem);
-    free (fd);
-  }
   lock_release (&filesys_lock);
+  if (!fd) return;
+  switch(fd->type){
+  case FILE_INODE:
+    file_close (fd->data.file);
+    break;
+  case DIR_INODE:
+    dir_close(fd->data.dir);
+    break;
+  }
+  list_remove (&fd->elem);
+  free (fd);
 }
 
 /* Filesize system call */
 int sys_filesize (int handle){
   lock_acquire (&filesys_lock);
   struct file_descriptor *fd = lookup_fd (handle);
-  if (!fd){
+  if (!fd || fd->type != FILE_INODE){
     lock_release (&filesys_lock);
     sys_exit (-1);
   }
-  int bytes = file_length (fd->file);
+  int bytes = file_length (fd->data.file);
   lock_release (&filesys_lock);
   return bytes;
 }
@@ -285,11 +323,11 @@ int sys_read (int handle, void *buffer, unsigned size){
 
   lock_acquire (&filesys_lock);
   struct file_descriptor *fd = lookup_fd (handle);
-  if (!fd){
+  if (!fd || fd->type != FILE_INODE){
     lock_release (&filesys_lock);
     sys_exit (-1);
   }
-  int bytes = file_read (fd->file, buffer, size);
+  int bytes = file_read (fd->data.file, buffer, size);
   lock_release (&filesys_lock);
   return bytes;
 }
@@ -298,11 +336,11 @@ int sys_read (int handle, void *buffer, unsigned size){
 unsigned tell (int handle){
   lock_acquire (&filesys_lock);
   struct file_descriptor *fd = lookup_fd (handle);
-  if (!fd){
+  if (!fd || fd->type != FILE_INODE){
     lock_release (&filesys_lock);
     sys_exit (-1);
   }
-  struct file *f = fd->file;
+  struct file *f = fd->data.file;
   unsigned bytes = file_tell (f);
   lock_release (&filesys_lock);
   return bytes;
@@ -312,13 +350,54 @@ unsigned tell (int handle){
 void seek (int handle, unsigned position){
   lock_acquire (&filesys_lock);
   struct file_descriptor *fd = lookup_fd (handle);
-  if (!fd){
+  if (!fd || fd->type != FILE_INODE){
     lock_release (&filesys_lock);
     sys_exit (-1);
   }
-  struct file *f = fd->file;
+  struct file *f = fd->data.file;
   file_seek (f, position);
   lock_release (&filesys_lock);
+}
+
+bool sys_chdir(const char *dir){
+  lock_acquire(&filesys_lock);
+  int success = filesys_chdir(dir);
+  lock_release(&filesys_lock);
+  return success;
+}
+
+bool sys_mkdir(const char *dir){
+  lock_acquire(&filesys_lock);
+  int success = filesys_create(dir, 0, DIR_INODE);
+  lock_release(&filesys_lock);
+  return success;
+}
+
+bool sys_readdir (int handle, char *name){
+  struct file_descriptor *fd = lookup_fd (handle);
+  if (fd->type != DIR_INODE) return false;
+  return dir_readdir(fd->data.dir, name);
+}
+
+bool sys_isdir (int handle){
+  struct file_descriptor *fd = lookup_fd (handle);
+  if (!fd) return false;
+  return fd->type == DIR_INODE;
+}
+
+int sys_inumber (int handle){
+  struct file_descriptor *fd = lookup_fd (handle);
+  if (!fd) sys_exit(-1);
+  int sector = -1;
+  switch(fd->type){
+  case FILE_INODE:
+    sector = file_get_inumber(fd->data.file);
+    break;
+  case DIR_INODE:
+    sector = dir_get_inumber(fd->data.dir);
+    break;
+  }
+  return sector;
 }
 
 /* Checks whether a user pointer is valid */
@@ -329,3 +408,4 @@ static void is_valid_pointer (const void *p){
     sys_exit (-1);
   }
 }
+
