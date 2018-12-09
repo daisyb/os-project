@@ -235,10 +235,8 @@ block_sector_t byte_to_sector (const struct inode *inode, off_t pos){
 off_t inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset){
   uint8_t *buffer = buffer_;
   off_t bytes_read = 0;
-  
   while (size > 0){
     /* Disk sector to read, starting byte offset within sector. */
-    block_sector_t sector_idx = byte_to_sector (inode, offset);
     int sector_ofs = offset % BLOCK_SECTOR_SIZE;
     
     /* Bytes left in inode, bytes left in sector, lesser of the two. */
@@ -250,6 +248,7 @@ off_t inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offse
     int chunk_size = size < min_left ? size : min_left;
     if (chunk_size <= 0)
       break;
+    block_sector_t sector_idx = byte_to_sector (inode, offset);    
     
     struct cache_block *b = get_block (sector_idx);
     memcpy (buffer + bytes_read, (uint8_t *) b->data + sector_ofs, chunk_size);
@@ -387,8 +386,6 @@ off_t inode_write_at (struct inode *inode, const void *buffer_, off_t size, off_
     return 0;
   while (size > 0){
     /* Sector to write, starting byte offset within sector. */
-    
-    block_sector_t sector_idx = byte_to_sector (inode, offset);
     int sector_ofs = offset % BLOCK_SECTOR_SIZE;
     
     /* Bytes left in inode, bytes left in sector, lesser of the two. */
@@ -400,7 +397,8 @@ off_t inode_write_at (struct inode *inode, const void *buffer_, off_t size, off_
     int chunk_size = size < min_left ? size : min_left;
     if (chunk_size <= 0)
       break;
-    
+    block_sector_t sector_idx = byte_to_sector (inode, offset);
+        
     struct cache_block *b = get_block (sector_idx);
     memcpy ((uint8_t *) &b->data + sector_ofs, buffer + bytes_written, chunk_size);
     cache_dirty(b);

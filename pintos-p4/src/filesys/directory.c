@@ -37,7 +37,7 @@ dir_create (block_sector_t sector, block_sector_t parent_sector)
   struct inode *inode = NULL;
   struct dir* dir = NULL;
   bool success = ((inode = inode_create (sector, DIR_INODE))
-                  && extend_file(inode, 1)
+                  && extend_file(inode, 512)
                   && (dir = dir_open(inode))
                   && dir_add(dir, ".", sector)
                   && dir_add(dir, "..", parent_sector));
