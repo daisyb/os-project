@@ -39,16 +39,17 @@ struct cache_block *lookup_block (block_sector_t sector){
 
 struct cache_block *cache_evict (void){
   struct cache_block *b = NULL;
+  struct cache_block *cur = NULL;
   lock_acquire(&cache_lock);
   int i;
   for (i=0; i<CACHE_CNT; i++){
-    if (cache[i].sector == INVALID_SECTOR){
-      b =  &cache[i];
+    cur = &cache[i];
+    if (cur->sector == INVALID_SECTOR){
+      b =  cur;
       cache_block_lock(b);
       break;
     }
   }
-  struct cache_block *cur = NULL;
   while(!b){
     cur = &cache[hand++];
     if (!cur->clock_bit && cache_block_try_lock(cur)){

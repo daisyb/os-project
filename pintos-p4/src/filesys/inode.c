@@ -20,9 +20,9 @@
 #define SECTOR_CNT (DIRECT_CNT + INDIRECT_CNT + DBL_INDIRECT_CNT)
 
 #define PTRS_PER_SECTOR ((off_t) (BLOCK_SECTOR_SIZE / sizeof (block_sector_t)))
-#define INODE_SPAN ((DIRECT_CNT
-		     + PTRS_PER_SECTOR * INDIRECT_CNT
-		     + PTRS_PER_SECTOR * PTRS_PER_SECTOR * DBL_INDIRECT_CNT)
+#define INODE_SPAN ((DIRECT_CNT \
+		     + PTRS_PER_SECTOR * INDIRECT_CNT \
+		     + PTRS_PER_SECTOR * PTRS_PER_SECTOR * DBL_INDIRECT_CNT) \
 		     * BLOCK_SECTOR_SIZE)
 
 /* On-disk inode.
@@ -54,6 +54,11 @@ struct inode {
   int writer_cnt;			/* Number of writers */
 };
 
+struct indirect_block {
+  block_sector_t sectors[PTRS_PER_SECTOR];
+  unsigned magic;
+};
+  
 /* List of open inodes, so that opening a single inode twice
    returns the same `struct inode'. */
 static struct list open_inodes;
@@ -137,9 +142,10 @@ struct inode *inode_reopen (struct inode *inode){
 /* Returns the type of INODE. */
 enum inode_type inode_get_type (const struct inode *inode){
   struct cache_block* b = get_block (inode->sector);
-  cache_block_unlock (b);
   struct inode_disk *id = (struct inode_disk *) b->data;
-  return id->type;
+  int type = id->type;
+  cache_block_unlock (b);
+  return type;
 }
 
 /* Returns INODE's inode number. */
@@ -166,8 +172,9 @@ void inode_close (struct inode *inode){
     /* Deallocate blocks if removed. */
     if (inode->removed){
       free_map_release (inode->sector, 1);
-      free_map_release (inode->data.start,
-			bytes_to_sectors (inode->data.length)); 
+      //TODO write method to free all sectors in inode
+      /* free_map_release (inode->data.start, */
+      /*   		bytes_to_sectors (inode->data.length));  */
     }
     
     free (inode); 
@@ -199,22 +206,25 @@ block_sector_t byte_to_sector (const struct inode *inode, off_t pos){
   /* In an indirect block -- currently implemented for only having 1 */
   if (sector < PTRS_PER_SECTOR){
     struct cache_block *b2 = get_block (id->sectors[DIRECT_CNT]);
-    struct inode_disk *id2 = (struct inode_disk *) b2->data;
+    struct indirect_block *indir = (struct indirect_block *) b2->data;
+    block_sector_t data_sector = indir->sectors[sector];
     cache_block_unlock (b2);
-    return id2->sectors[sector];
+    return data_sector;
   }
   sector -= PTRS_PER_SECTOR;
   /* In a dbl-indirect block -- currently implemented for only having 1 */
   if (sector < PTRS_PER_SECTOR * PTRS_PER_SECTOR){
-    struct cache_block *b2 = get_block (id->sectors[DIRECT_CNT + INDIRECT_CNT]);
-    struct inode_disk *id2 = (struct inode_disk *) b2->data;
-    cache_block_unlock (b2);
     block_sector_t next_sector = sector / PTRS_PER_SECTOR;
-    struct cache_block *b3 = get_block (id2->sectors[next_sector]);
-    struct inode_disk *id3 = (struct inode_disk *) b3->data;
-    cache_block_unlock (b3);
+    struct cache_block *b2 = get_block (id->sectors[DIRECT_CNT + INDIRECT_CNT]);
+    struct indirect_block *indir = (struct indirect_block *) b2->data;
+    block_sector_t dbl_sector = indir->sectors[next_sector];
+    cache_block_unlock (b2);
+    struct cache_block *b3 = get_block (dbl_sector);
+    struct indirect_block *dbl_indir = (struct indirect_block *) b3->data;
     sector -= next_sector * PTRS_PER_SECTOR;
-    return id3->sectors[sector];
+    block_sector_t data_sector = dbl_indir->sectors[sector];
+    cache_block_unlock (b3);
+    return data_sector;
   }
   PANIC ("byte-to-sector failed.");
 }
@@ -277,7 +287,8 @@ off_t inode_write_at (struct inode *inode, const void *buffer_, off_t size, off_
     /* Number of bytes to actually write into this sector. */
     int chunk_size = size < min_left ? size : min_left;
     if (chunk_size <= 0)
-
+      break;
+    
     struct cache_block *b = get_block (sector_idx);
     memcpy ((uint8_t *) &b->data + sector_ofs, buffer + bytes_written, chunk_size);
     cache_dirty(b);
@@ -310,9 +321,10 @@ void inode_allow_write (struct inode *inode){
 /* Returns the length, in bytes, of INODE's data. */
 off_t inode_length (const struct inode *inode){
   struct cache_block *b = get_block (inode->sector);
-  cache_block_unlock (b);
   struct inode_disk *id = (struct inode_disk *) b->data;
-  return id->length;
+  int length = id->length;
+  cache_block_unlock (b);
+  return length;
 }
 
 /* Returns the number of openers. */
