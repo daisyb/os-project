@@ -263,6 +263,145 @@ off_t inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offse
   return bytes_read;
 }
 
+
+int
+extend_direct(struct inode_disk *id, int current_idx, int remaing){
+  int cnt = 0;
+  block_sector_t sector;
+  for (current_idx; current_idx < remaining  && current_idx < DIRECT_CNT;
+       current_idx++, cnt++){
+      free_map_allocate(1, &sector);
+      id->sectors[current_idx] = sector;
+  }
+  return cnt;
+}
+
+int
+extend_indirect(struct indirect_block *indir, int current_idx, int remaining){
+  int cnt = 0;
+  block_sector_t sector;
+  int start_idx = current_idx;
+  for (current_idx;  current_idx < remaining + start_idx
+         && current_idx < PTRS_PER_SECTOR;
+       current_idx++, cnt++){
+      free_map_allocate(1, &sector);
+      indir->sectors[current_idx] = sector;
+  }
+  return cnt;
+ 
+}
+
+int
+extend_dbl(struct indirect_block *dbl_indir, int current_idx, int remaining){
+  int cnt = 0;
+  int dbl_index = current_idx / PTRS_PER_SECTOR;
+  
+}
+static void
+extend_file (struct inode *inode, off_t length){
+  int current_length = inode_length(inode);
+  if (current_length < length)
+    return;
+  size_t current_idx = bytes_to_sectors(current_length);
+  size_t remaining = bytes_to_sectors(length);
+  struct cache_block *b = get_block(inode->sector);
+  struct inode_disk *id = (struct inode disk *)b->data;
+  int amount_filled = extend_direct(id, current_idx, total_idx);
+  remaining -= amount_filled;
+  current_idx += amount_filled;
+  if (remaining == 0){
+    cache_block_unlock(b);
+    return;
+  }
+  if (!id->sectors[DIRECT_CNT]){
+    block_sector_t sector;
+    free_map_allocate(1, &sector);
+    id->sectors[DIRECT_CNT] = sector;    
+  }
+  struct cache_block *indir_block = get_block(id->sectors[DIRECT_CNT]);
+  struct indirect_block *indir = (struct indirect_block *)indir_block->data;
+  int amount_filled = extend_indirect(indir, current_idx - DIRECT_CNT, remaining);
+  remaining -= amount_filled;
+  current_idx += amount_filled;
+  if (remaining == 0){
+    cache_block_unlock(b);
+    cache_block_unlock(indir_block);
+    return;
+  }
+  if (!id->sectors[DIRECT_CNT + INDIRECT_CNT]){
+    block_sector_t sector;
+    free_map_allocate(1, &sector);
+    id->sectors[DIRECT_CNT + INDIRECT_CNT] = sector;    
+  }
+  struct cache_block *dbl_block = get_block(id->sectors[DIRECT_CNT + INDIRECT_CNT]);
+  struct indirect_block *dbl_indir = (struct indirect_block *)dbl_block->data;
+  int amount_filled = extend_dbl(dbl_indir,
+                                 current_idx - (DIRECT_CNT + PTRS_PER_SECTOR),
+                                 remaining);
+  
+  
+}
+/*
+Extends inode to be atleast length long
+*/
+static void
+extend_file (struct inode *inode, off_t length){
+  int current_length = inode_length(inode);
+  if (current_length < length)
+    return;
+  size_t current_idx = bytes_to_sectors(current_length);
+  size_t total_idx = bytes_to_sectors(length);
+  // beginning of sector mappings
+  //size_t cnt = (total_idx - current_idx);
+  /* if (!free_map_allocate(cnt, &sector_start)){ */
+    
+  /* } */
+  struct cache_block *b = get_block(inode->sector);
+  struct inode_disk *id = (struct inode disk *)b->data;
+  struct indirect_block *indir= NULL;
+  struct indirect_block *dbl_indr = NULL;
+  block_sector_t sector;
+  for (current_idx; current_idx < total_idx; current_idx++){
+    if (current_idx < DIRECT_CNT){
+      free_map_allocate(1, &sector);
+      id->sectors[current_idx] = sector;
+    } else if (current_idx == DIRECT_CNT){      
+      free_map_allocate(1, &sector);
+      id->sectors[current_idx] = sector; //indirect pointer
+      cache_block_unlock(b);
+      b = get_block(sector);
+      indir = (struct indirect_block *)b->data;
+      indir->magic = INODE_MAGIC;
+      free_map_allocate(1, &sector);
+      indir->sectors[current_idx - DIRECT_CNT] = sector;
+    } else if (current_idx < DIRECT_CNT + PTRS_PER_SECTOR){
+      if (!indir){
+        block_sector_t indirect_ptr = id->sectors[DIRECT_CNT];
+        cache_block_unlock(b);
+        b = get_block(indirect_ptr);
+        indir = (struct indirect_block *)b->data;
+      }
+      free_map_allocate(1, &sector);
+      indir->sectors[current_idx - DIRECT_CNT] = sector; 
+    } else if (current_idx == DIRECT_CNT + INDIRECT_CNT * PTRS_PER_SECTOR){
+      if (indir){
+        cache_block_unlock(b);
+        b = get_block(inode->sector);
+        id = (struct inode disk *)b->data;
+      }
+      free_map_allocate(1, &sector);
+      id->sectors[DIRECT_CNT + INDIRECT_CNT] = sector; //dbl indirect pointer
+      cache_block_unlock(b);
+      b = get_block(sector);
+      dbl_indir = (struct indirect_block *)b->data;
+      dbl_indir->magic = INODE_MAGIC;
+      free_map_allocate(1, &sector);
+      dbl_indir->sectors[current_idx - DIRECT_CNT] = sector;      
+    }
+    
+  }
+  cache_block_unlock(b);
+}
 /* Writes SIZE bytes from BUFFER into INODE, starting at OFFSET.
    Returns the number of bytes actually written, which may be
    less than SIZE if end of file is reached or an error occurs.
