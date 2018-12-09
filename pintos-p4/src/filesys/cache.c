@@ -104,9 +104,9 @@ UNUSED static bool cache_block_try_lock(struct cache_block *b){
   return lock_try_acquire(&b->block_lock);
 }
 
-void cache_unlock(struct cache_block *b){
-  ASSERT(lock_held_by_current_thread(&b->block_lock));
-  lock_release(&b->block_lock);  
+void cache_block_unlock(struct cache_block *b){
+  ASSERT (lock_held_by_current_thread(&b->block_lock));
+  lock_release (&b->block_lock);  
 }
 
 void cache_flush (void){
