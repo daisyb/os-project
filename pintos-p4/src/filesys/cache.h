@@ -22,6 +22,7 @@ enum lock_type
 
 #define INVALID_SECTOR ((block_sector_t) -1)
 #define CACHE_CNT 64
+
 struct cache_block cache[CACHE_CNT];
 struct lock cache_lock;
 
@@ -36,5 +37,6 @@ void cache_write (void *src, block_sector_t dst);
 void cache_flush (void);
 void cache_block_unlock (struct cache_block *b);
 void cache_dirty (struct cache_block *b);
+void cache_zero (struct cache_block *b);
 
 #endif /* filesys/cache.h */

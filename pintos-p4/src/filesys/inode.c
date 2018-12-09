@@ -192,7 +192,6 @@ block_sector_t byte_to_sector (const struct inode *inode, off_t pos){
   ASSERT (inode != NULL);
   struct cache_block *b = get_block (inode->sector);
   struct inode_disk *id = (struct inode_disk *) b->data;
-  cache_block_unlock (b);
 
   /* Not sure if this will need to be changed for seeks past EOF. */
   ASSERT (pos < id->length);
@@ -200,7 +199,9 @@ block_sector_t byte_to_sector (const struct inode *inode, off_t pos){
   block_sector_t sector = pos / BLOCK_SECTOR_SIZE;
   /* In a direct block. */
   if (sector < DIRECT_CNT){
-    return id->sectors[sector];
+    int data_sector = id->sectors[sector];
+    cache_block_unlock(b);
+    return data_sector;
   }
   sector -= DIRECT_CNT;
   /* In an indirect block -- currently implemented for only having 1 */
@@ -208,6 +209,7 @@ block_sector_t byte_to_sector (const struct inode *inode, off_t pos){
     struct cache_block *b2 = get_block (id->sectors[DIRECT_CNT]);
     struct indirect_block *indir = (struct indirect_block *) b2->data;
     block_sector_t data_sector = indir->sectors[sector];
+    cache_block_unlock(b);
     cache_block_unlock (b2);
     return data_sector;
   }
@@ -223,6 +225,7 @@ block_sector_t byte_to_sector (const struct inode *inode, off_t pos){
     struct indirect_block *dbl_indir = (struct indirect_block *) b3->data;
     sector -= next_sector * PTRS_PER_SECTOR;
     block_sector_t data_sector = dbl_indir->sectors[sector];
+    cache_block_unlock(b);
     cache_block_unlock (b3);
     return data_sector;
   }
@@ -270,9 +273,9 @@ extend_direct(struct inode_disk *id, int current_idx, int remaining){
   for (; current_idx < remaining  && current_idx < DIRECT_CNT;
        current_idx++, cnt++){
       free_map_allocate(1, &sector);
-      /* Set to 0 */
+      //Set to 0
       struct cache_block *b = get_block (sector);
-      memset (b->data, 0, BLOCK_SECTOR_SIZE);
+      cache_zero(b);
       cache_block_unlock (b);
       id->sectors[current_idx] = sector;
   }
@@ -287,12 +290,12 @@ extend_indirect(struct indirect_block *indir, int current_idx, int remaining){
   for (; current_idx < remaining + start_idx
          && current_idx < PTRS_PER_SECTOR;
        current_idx++, cnt++){
-      free_map_allocate(1, &sector);
-      /* Set to 0 */
-      struct cache_block *b = get_block (sector);
-      memset (b->data, 0, BLOCK_SECTOR_SIZE);
-      cache_block_unlock (b);
-      indir->sectors[current_idx] = sector;
+    free_map_allocate(1, &sector);
+    /* Set to 0 */
+    struct cache_block *b = get_block (sector);
+    cache_zero(b);
+    cache_block_unlock (b);
+    indir->sectors[current_idx] = sector;
   }
   return cnt;
  
@@ -312,9 +315,10 @@ extend_dbl(struct indirect_block *dbl_indir, int current_idx, int remaining){
     }
     int indir_current_idx = current_idx - dbl_idx * PTRS_PER_SECTOR;
     struct cache_block *b = get_block (dbl_indir->sectors[dbl_idx]);
+    cache_dirty(b);
     struct indirect_block *indir = (struct indirect_block *) b->data;
     int amount_filled = extend_indirect (indir, indir_current_idx, remaining);
-    cache_block_unlock (b);
+    cache_block_unlock (b);    
     remaining -= amount_filled;
     current_idx += amount_filled;
     dbl_idx = current_idx / PTRS_PER_SECTOR;
@@ -330,9 +334,12 @@ extend_file (struct inode *inode, off_t length){
     success = true;
     return success;
   }
+
   size_t current_idx = bytes_to_sectors(current_length);
   size_t remaining = bytes_to_sectors(length);
   struct cache_block *b = get_block(inode->sector);
+  cache_dirty(b);
+  
   struct inode_disk *id = (struct inode_disk *)b->data;
   id->length = length;
   int amount_filled = extend_direct(id, current_idx, remaining);
@@ -349,6 +356,8 @@ extend_file (struct inode *inode, off_t length){
     id->sectors[DIRECT_CNT] = sector;    
   }
   struct cache_block *indir_block = get_block(id->sectors[DIRECT_CNT]);
+  cache_dirty(indir_block);
+  
   struct indirect_block *indir = (struct indirect_block *)indir_block->data;
   amount_filled = extend_indirect(indir, current_idx - DIRECT_CNT, remaining);
   remaining -= amount_filled;
@@ -365,6 +374,8 @@ extend_file (struct inode *inode, off_t length){
     id->sectors[DIRECT_CNT + INDIRECT_CNT] = sector;    
   }
   struct cache_block *dbl_block = get_block(id->sectors[DIRECT_CNT + INDIRECT_CNT]);
+  cache_dirty(dbl_block);
+  
   struct indirect_block *dbl_indir = (struct indirect_block *)dbl_block->data;
   amount_filled = extend_dbl(dbl_indir,
 			     current_idx - (DIRECT_CNT + PTRS_PER_SECTOR),
@@ -391,6 +402,11 @@ off_t inode_write_at (struct inode *inode, const void *buffer_, off_t size, off_
 
   if (inode->deny_write_cnt)
     return 0;
+
+  off_t current_length = inode_length (inode);
+  if (offset + size > current_length){   
+    extend_file (inode, offset + size - current_length);
+  }
   while (size > 0){
     /* Sector to write, starting byte offset within sector. */
     int sector_ofs = offset % BLOCK_SECTOR_SIZE;
@@ -402,15 +418,11 @@ off_t inode_write_at (struct inode *inode, const void *buffer_, off_t size, off_
 
     /* Number of bytes to actually write into this sector. */
     int chunk_size = size < min_left ? size : min_left;
-    if (chunk_size <= 0)
+    if (chunk_size <= 0){
       break;
+    }
     block_sector_t sector_idx = byte_to_sector (inode, offset);
 
-    off_t current_length = inode_length (inode);
-    if (offset + size > current_length){
-      extend_file (inode, offset + size - current_length);
-    }
-            
     struct cache_block *b = get_block (sector_idx);
     memcpy ((uint8_t *) &b->data + sector_ofs, buffer + bytes_written, chunk_size);
     cache_dirty(b);

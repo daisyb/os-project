@@ -79,6 +79,7 @@ struct cache_block *get_block (block_sector_t sector){
     b->clock_bit = true;
     return b;
   }
+
   b = cache_evict ();
   if (!b)
     PANIC ("Buffer cache failure.");
@@ -98,10 +99,13 @@ cache_dirty (struct cache_block *b)
 }
 
 static void cache_block_lock(struct cache_block *b){
+  ASSERT(!lock_held_by_current_thread(&b->block_lock))
   lock_acquire(&b->block_lock);  
 }
 
-UNUSED static bool cache_block_try_lock(struct cache_block *b){
+static bool cache_block_try_lock(struct cache_block *b){
+  if (lock_held_by_current_thread(&b->block_lock))
+    return false;
   return lock_try_acquire(&b->block_lock);
 }
 
@@ -121,4 +125,14 @@ void cache_flush (void){
     b->sector = INVALID_SECTOR;
   }
   lock_release (&cache_lock);
+}
+
+/* Zero out block B, without reading it from disk
+   The caller must have an exclusive lock on B. */
+void
+cache_zero (struct cache_block *b)
+{
+  ASSERT(lock_held_by_current_thread(&b->block_lock));
+  memset (b->data, 0, BLOCK_SECTOR_SIZE);
+  cache_dirty(b);
 }

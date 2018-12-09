@@ -37,7 +37,7 @@ dir_create (block_sector_t sector, block_sector_t parent_sector)
   struct inode *inode = NULL;
   struct dir* dir = NULL;
   bool success = ((inode = inode_create (sector, DIR_INODE))
-                  && extend_file(inode, 512)
+                  && extend_file(inode, BLOCK_SECTOR_SIZE)
                   && (dir = dir_open(inode))
                   && dir_add(dir, ".", sector)
                   && dir_add(dir, "..", parent_sector));
@@ -215,7 +215,7 @@ dir_add (struct dir *dir, const char *name, block_sector_t inode_sector)
   strlcpy (e.name, name, sizeof e.name);
   e.inode_sector = inode_sector;
   success = inode_write_at (dir->inode, &e, sizeof e, ofs) == sizeof e;
-
+  
  done:
   inode_unlock(dir->inode);
   return success;
