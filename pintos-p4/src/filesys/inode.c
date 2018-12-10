@@ -156,7 +156,7 @@ block_sector_t inode_get_inumber (const struct inode *inode){
 
 static void
 free_sector(block_sector_t sector){
-  cache_free(sector);
+  //cache_free(sector);
   free_map_release(sector);
 }
 
