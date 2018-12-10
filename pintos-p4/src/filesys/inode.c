@@ -190,6 +190,7 @@ close_inode_sectors(struct inode *inode){
   struct indirect_block *indir = (struct indirect_block *) b2->data;
   remaining = close_indirect_block (indir, remaining);
   cache_block_unlock (b2);
+  free_sector (id->sectors[DIRECT_CNT]);
   if (remaining == 0) goto done;
 
   sector = 0;
@@ -204,14 +205,13 @@ close_inode_sectors(struct inode *inode){
     cache_block_unlock (b3);
     sector++;
   }
+  free_sector (id->sectors[DIRECT_CNT + INDIRECT_CNT]);
   if (remaining == 0) goto done;
   PANIC ("Could not close inode.");
       
  done:
   cache_block_unlock (b);
-  free_sector (id->sectors[DIRECT_CNT]);
   free_sector(inode->sector);
-  free_sector (id->sectors[DIRECT_CNT + INDIRECT_CNT]);
 }
 
 
