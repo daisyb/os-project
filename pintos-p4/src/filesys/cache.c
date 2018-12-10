@@ -94,6 +94,7 @@ struct cache_block *get_block (block_sector_t sector){
 void
 cache_dirty (struct cache_block *b)
 {
+  if (b == NULL) return;
   ASSERT(lock_held_by_current_thread(&b->block_lock));
   b->dirty = true;
 }
@@ -110,6 +111,7 @@ static bool cache_block_try_lock(struct cache_block *b){
 }
 
 void cache_block_unlock(struct cache_block *b){
+  if (b == NULL) return;
   ASSERT (lock_held_by_current_thread(&b->block_lock));
   lock_release (&b->block_lock);  
 }

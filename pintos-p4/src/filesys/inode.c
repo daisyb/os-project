@@ -329,65 +329,74 @@ extend_dbl(struct indirect_block *dbl_indir, int current_idx, int remaining){
 bool
 extend_file (struct inode *inode, off_t length){
   bool success = false;
+  struct cache_block *id_block = NULL;
+  struct cache_block *indir_block = NULL;
+  struct cache_block *dbl_block = NULL;
+  
   int current_length = inode_length(inode);
-  if (current_length > length){
-    success = true;
-    return success;
-  }
 
   size_t current_idx = bytes_to_sectors(current_length);
   size_t remaining = bytes_to_sectors(length);
-  struct cache_block *b = get_block(inode->sector);
-  cache_dirty(b);
-  
-  struct inode_disk *id = (struct inode_disk *)b->data;
+
+  id_block = get_block(inode->sector);
+
+  struct inode_disk *id = (struct inode_disk *)id_block->data;
   id->length = length;
+
+  if (current_idx >= remaining){
+    success = true;
+    goto done;
+  }
+
   int amount_filled = extend_direct(id, current_idx, remaining);
   remaining -= amount_filled;
   current_idx += amount_filled;
   if (remaining == 0){
     success = true;
-    cache_block_unlock(b);
-    return success;
+    goto done;
   }
+
   if (!id->sectors[DIRECT_CNT]){
     block_sector_t sector;
     free_map_allocate(1, &sector);
     id->sectors[DIRECT_CNT] = sector;    
   }
-  struct cache_block *indir_block = get_block(id->sectors[DIRECT_CNT]);
-  cache_dirty(indir_block);
+  
+  indir_block = get_block(id->sectors[DIRECT_CNT]);
   
   struct indirect_block *indir = (struct indirect_block *)indir_block->data;
   amount_filled = extend_indirect(indir, current_idx - DIRECT_CNT, remaining);
   remaining -= amount_filled;
   current_idx += amount_filled;
+  
   if (remaining == 0){
     success = true;
-    cache_block_unlock(b);
-    cache_block_unlock(indir_block);
-    return success;
+    goto done;
   }
+  
   if (!id->sectors[DIRECT_CNT + INDIRECT_CNT]){
     block_sector_t sector;
     free_map_allocate(1, &sector);
     id->sectors[DIRECT_CNT + INDIRECT_CNT] = sector;    
   }
-  struct cache_block *dbl_block = get_block(id->sectors[DIRECT_CNT + INDIRECT_CNT]);
-  cache_dirty(dbl_block);
+
+  dbl_block = get_block(id->sectors[DIRECT_CNT + INDIRECT_CNT]);
   
   struct indirect_block *dbl_indir = (struct indirect_block *)dbl_block->data;
   amount_filled = extend_dbl(dbl_indir,
 			     current_idx - (DIRECT_CNT + PTRS_PER_SECTOR),
 			     remaining);
   remaining -= amount_filled;
-  if (remaining == 0){
-    success = true;
-    cache_block_unlock (b);
-    cache_block_unlock (indir_block);
-    cache_block_unlock (dbl_block);
-    return success;
-  }
+  if (remaining == 0) success = true;
+  
+
+ done:
+  cache_dirty(id_block);
+  cache_dirty(indir_block);
+  cache_dirty(dbl_block);
+  cache_block_unlock (id_block);
+  cache_block_unlock (indir_block);
+  cache_block_unlock (dbl_block);  
   return success;
 }
 
@@ -402,10 +411,13 @@ off_t inode_write_at (struct inode *inode, const void *buffer_, off_t size, off_
 
   if (inode->deny_write_cnt)
     return 0;
-
+  
   off_t current_length = inode_length (inode);
-  if (offset + size > current_length){   
-    extend_file (inode, offset + size - current_length);
+  if (offset + size > current_length){
+    //printf("length before %d\n", current_length);
+    //printf("grow by %d\n", offset + size - current_length);
+    extend_file (inode, offset + size);
+    //printf("length after %d\n", inode_length(inode));
   }
   while (size > 0){
     /* Sector to write, starting byte offset within sector. */
@@ -419,6 +431,7 @@ off_t inode_write_at (struct inode *inode, const void *buffer_, off_t size, off_
     /* Number of bytes to actually write into this sector. */
     int chunk_size = size < min_left ? size : min_left;
     if (chunk_size <= 0){
+      printf("chunky\n");
       break;
     }
     block_sector_t sector_idx = byte_to_sector (inode, offset);
