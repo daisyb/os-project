@@ -138,3 +138,16 @@ cache_zero (struct cache_block *b)
   memset (b->data, 0, BLOCK_SECTOR_SIZE);
   cache_dirty(b);
 }
+
+/* If SECTOR is in the cache, evicts it immediately without
+   writing it back to disk (even if dirty).
+   The block must be entirely unused. */
+void
+cache_free (block_sector_t sector)
+{
+  struct cache_block *b = lookup_block (sector);
+  if(b){
+    b->sector = INVALID_SECTOR;
+    cache_block_unlock(b);
+  }  
+}

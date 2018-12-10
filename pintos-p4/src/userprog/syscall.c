@@ -266,12 +266,13 @@ int sys_open (const char *file){
   char *kfile = copy_in_string (file);
   lock_acquire (&filesys_lock);
   struct inode *open_try = filesys_open (kfile);
-  lock_release (&filesys_lock);
   if (!open_try){
+    lock_release (&filesys_lock);
     return -1;
   }
   int handle = fd_alloc(open_try);
   palloc_free_page (kfile);
+  lock_release (&filesys_lock);
   return handle;
 }
 
@@ -374,15 +375,14 @@ bool sys_mkdir(const char *dir){
 }
 
 bool sys_readdir (int handle, char *name){
-  struct file_descriptor *fd = lookup_fd (handle);
-  if (fd->type != DIR_INODE) return false;
-  return dir_readdir(fd->data.dir, name);
+  struct file_descriptor *fd = lookup_fd (handle);  
+  return fd->type == DIR_INODE && dir_readdir(fd->data.dir, name);
+
 }
 
 bool sys_isdir (int handle){
   struct file_descriptor *fd = lookup_fd (handle);
-  if (!fd) return false;
-  return fd->type == DIR_INODE;
+  return fd && (fd->type == DIR_INODE);
 }
 
 int sys_inumber (int handle){

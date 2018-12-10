@@ -38,5 +38,6 @@ void cache_flush (void);
 void cache_block_unlock (struct cache_block *b);
 void cache_dirty (struct cache_block *b);
 void cache_zero (struct cache_block *b);
+void cache_free (block_sector_t sector);
 
 #endif /* filesys/cache.h */

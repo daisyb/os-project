@@ -79,10 +79,9 @@ resolve_name_to_entry (const char *name,
   struct thread *t = thread_current();
   *dirp = *name == '/'? dir_open_root() : t->working_dir;
   if (!strcmp(name, "")) return false;
-  const char **namep = &name;
   struct inode *inode = NULL;
   int value;
-  while((value = get_next_part(base_name, namep)) && **namep != '\0'){
+  while((value = get_next_part(base_name, &name)) && *name != '\0'){
     if (value == -1) return false;
     if (!dir_lookup(*dirp, base_name, &inode) 
         || inode_get_type(inode) == FILE_INODE){ 
@@ -117,8 +116,8 @@ resolve_name_to_inode (const char *name)
 void
 filesys_done (void) 
 {
-  cache_flush ();
   free_map_close ();
+  cache_flush ();
 }
 
 /* Creates a file named NAME with the given INITIAL_SIZE.
@@ -133,7 +132,7 @@ filesys_create (const char *name, off_t initial_size, enum inode_type type)
   char base_name[NAME_MAX + 1];
   bool success = (resolve_name_to_entry(name, &dir, base_name) 
                   && dir
-                  && free_map_allocate(1, &inode_sector));
+                  && free_map_allocate(&inode_sector));
   if (type == DIR_INODE)
     success = success && dir_create(inode_sector, dir_get_inumber(dir));
   else {

@@ -88,6 +88,7 @@ struct inode *inode_create (block_sector_t sector, enum inode_type type){
 
     struct cache_block *b = get_block (sector);
     memcpy (b->data, disk_inode, BLOCK_SECTOR_SIZE);
+    cache_dirty(b);
     cache_block_unlock (b);
     free (disk_inode);
     struct inode *inode = inode_open (sector);
@@ -153,14 +154,64 @@ block_sector_t inode_get_inumber (const struct inode *inode){
   return inode->sector;
 }
 
-static block_sector_t close_indirect_block (struct indirect_block *indir, block_sector_t remaining){
+static void
+free_sector(block_sector_t sector){
+  cache_free(sector);
+  free_map_release(sector);
+}
+
+static block_sector_t
+close_indirect_block (struct indirect_block *indir, block_sector_t remaining){
   block_sector_t sector = 0;
-  while (remaining > 0 && sector < PTRS_PER_SECTOR){
-    free_map_release (indir->sectors[sector]);
+  while (remaining > 0 && sector < PTRS_PER_SECTOR){    
+    free_sector(indir->sectors[sector]);
     remaining--;
     sector++;
   }
   return remaining;
+}
+
+
+static void
+close_inode_sectors(struct inode *inode){
+  struct cache_block *b = get_block (inode->sector);
+  struct inode_disk *id = (struct inode_disk *) b->data;
+  block_sector_t remaining = bytes_to_sectors (id->length);
+      
+  block_sector_t sector = 0;
+  while (remaining > 0 && sector < DIRECT_CNT){
+    free_sector (id->sectors[sector]);
+    remaining--;
+    sector++;
+  }
+  if (remaining == 0) goto done;
+      
+  struct cache_block *b2 = get_block (id->sectors[DIRECT_CNT]);
+  struct indirect_block *indir = (struct indirect_block *) b2->data;
+  remaining = close_indirect_block (indir, remaining);
+  cache_block_unlock (b2);
+  if (remaining == 0) goto done;
+
+  sector = 0;
+  b2 = get_block (id->sectors[DIRECT_CNT + INDIRECT_CNT]);
+  struct indirect_block *dbl_indir = (struct indirect_block *) b2->data;
+  struct cache_block *b3;
+  while (remaining > 0 && sector < PTRS_PER_SECTOR){
+    b3 = get_block (dbl_indir->sectors[sector]);
+    indir = (struct indirect_block *) b3->data;
+    remaining = close_indirect_block (indir, remaining);
+    free_sector (dbl_indir->sectors[sector]);
+    cache_block_unlock (b3);
+    sector++;
+  }
+  if (remaining == 0) goto done;
+  PANIC ("Could not close inode.");
+      
+ done:
+  cache_block_unlock (b);
+  free_sector (id->sectors[DIRECT_CNT]);
+  free_sector(inode->sector);
+  free_sector (id->sectors[DIRECT_CNT + INDIRECT_CNT]);
 }
 
 
@@ -176,45 +227,7 @@ void inode_close (struct inode *inode){
   if (open_cnt == 0){
     list_remove (&inode->elem);
     if (inode->removed){
-
-      struct cache_block *b = get_block (inode->sector);
-      struct inode_disk *id = (struct inode_disk *) b->data;
-      block_sector_t remaining = bytes_to_sectors (id->length);
-      
-      block_sector_t sector = 0;
-      while (remaining > 0 && sector < DIRECT_CNT){
-	free_map_release (id->sectors[sector]);
-	remaining--;
-	sector++;
-      }
-      if (remaining == 0) goto done;
-      
-      struct cache_block *b2 = get_block (id->sectors[DIRECT_CNT]);
-      struct indirect_block *indir = (struct indirect_block *) b2->data;
-      remaining = close_indirect_block (indir, remaining);
-      free_map_release (id->sectors[DIRECT_CNT]);
-      cache_block_unlock (b2);
-      if (remaining == 0) goto done;
-
-      sector = 0;
-      b2 = get_block (id->sectors[DIRECT_CNT + INDIRECT_CNT]);
-      struct indirect_block *dbl_indir = (struct indirect_block *) b2->data;
-      struct cache_block *b3;
-      while (remaining > 0 && sector < PTRS_PER_SECTOR){
-        b3 = get_block (dbl_indir->sectors[sector]);
-        indir = (struct indirect_block *) b3->data;
-	remaining = close_indirect_block (indir, remaining);
-	free_map_release (dbl_indir->sectors[sector]);
-	cache_block_unlock (b3);
-	sector++;
-      }
-      free_map_release (id->sectors[DIRECT_CNT + INDIRECT_CNT]);
-      cache_block_unlock (b2);
-      if (remaining == 0) goto done;
-      PANIC ("Could not close inode.");
-      
-    done:
-      cache_block_unlock (b);
+      close_inode_sectors(inode);
     }    
     free (inode); 
   }
@@ -312,8 +325,8 @@ extend_direct(struct inode_disk *id, int current_idx, int remaining){
   block_sector_t sector;
   for (; current_idx < remaining  && current_idx < DIRECT_CNT;
        current_idx++, cnt++){
-      free_map_allocate(1, &sector);
-      //Set to 0
+      free_map_allocate(&sector);
+      //Set to
       struct cache_block *b = get_block (sector);
       cache_zero(b);
       cache_block_unlock (b);
@@ -330,7 +343,7 @@ extend_indirect(struct indirect_block *indir, int current_idx, int remaining){
   for (; current_idx < remaining + start_idx
          && current_idx < PTRS_PER_SECTOR;
        current_idx++, cnt++){
-    free_map_allocate(1, &sector);
+    free_map_allocate(&sector);
     /* Set to 0 */
     struct cache_block *b = get_block (sector);
     cache_zero(b);
@@ -350,7 +363,7 @@ extend_dbl(struct indirect_block *dbl_indir, int current_idx, int remaining){
   for (; dbl_idx < PTRS_PER_SECTOR && current_idx < remaining + start_idx;
        current_idx++, cnt++){
     if (!dbl_indir->sectors[dbl_idx]){
-      free_map_allocate (1, &sector);
+      free_map_allocate (&sector);
       dbl_indir->sectors[dbl_idx] = sector;
     }
     int indir_current_idx = current_idx - dbl_idx * PTRS_PER_SECTOR;
@@ -359,7 +372,7 @@ extend_dbl(struct indirect_block *dbl_indir, int current_idx, int remaining){
     struct indirect_block *indir = (struct indirect_block *) b->data;
     int amount_filled = extend_indirect (indir, indir_current_idx, remaining);
     cache_block_unlock (b);    
-    remaining -= amount_filled;
+    //remaining -= amount_filled;
     current_idx += amount_filled;
     dbl_idx = current_idx / PTRS_PER_SECTOR;
   }
@@ -392,7 +405,7 @@ extend_file (struct inode *inode, off_t length){
   
   if (!id->sectors[DIRECT_CNT]){
     block_sector_t sector;
-    free_map_allocate(1, &sector);
+    free_map_allocate(&sector);
     id->sectors[DIRECT_CNT] = sector;    
   }
 
@@ -405,7 +418,7 @@ extend_file (struct inode *inode, off_t length){
   
   if (!id->sectors[DIRECT_CNT + INDIRECT_CNT]){
     block_sector_t sector;
-    free_map_allocate(1, &sector);
+    free_map_allocate(&sector);
     id->sectors[DIRECT_CNT + INDIRECT_CNT] = sector;    
   }
 
@@ -415,8 +428,10 @@ extend_file (struct inode *inode, off_t length){
 			     current_idx - (DIRECT_CNT + PTRS_PER_SECTOR),
 			     remaining);
   
-  if (remaining > current_idx)
-    success = false;  
+  if (remaining > current_idx){
+    success = false;
+    id->length = (current_idx - 1) * BLOCK_SECTOR_SIZE;
+  }
 
  done:
   cache_dirty(id_block);

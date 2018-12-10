@@ -4,8 +4,6 @@
 #include "filesys/file.h"
 #include "filesys/filesys.h"
 #include "threads/synch.h"
-
-#include "threads/synch.h"
 #include <stdio.h>
 
 static struct file *free_map_file;   /* Free map file. */
@@ -14,9 +12,10 @@ static struct lock free_map_lock;    /* Mutual exclusion. */
 
 /* Initializes the free map. */
 void
-free_map_init (void) 
+free_map_init (void)
 {
- lock_init(&free_map_lock);
+  lock_init (&free_map_lock);
+
   free_map = bitmap_create (block_size (fs_device));
   if (free_map == NULL)
     PANIC ("bitmap creation failed--file system device is too large");
@@ -24,27 +23,27 @@ free_map_init (void)
   bitmap_mark (free_map, ROOT_DIR_SECTOR);
 }
 
-/* Allocates CNT consecutive sectors from the free map and stores
-   the first into *SECTORP.
+/* Allocates a sector from the free map and stores it into
+   *SECTORP.
    Returns true if successful, false if not enough consecutive
    sectors were available or if the free_map file could not be
    written. */
 bool
-free_map_allocate (size_t cnt, block_sector_t *sectorp)
+free_map_allocate (block_sector_t *sectorp)
 {
-  lock_acquire(&free_map_lock);
-   block_sector_t sector = bitmap_scan_and_flip (free_map, 0, cnt, false);
-   lock_release(&free_map_lock);
-  if (sector != BITMAP_ERROR
-      && free_map_file != NULL
-      && !bitmap_write (free_map, free_map_file))
-    {
-      bitmap_set_multiple (free_map, sector, cnt, false);
-      sector = BITMAP_ERROR;
-    }
- 
+  size_t sector;
+
+  lock_acquire (&free_map_lock);
+  sector = bitmap_scan_and_flip (free_map, 0, 1, false);
+  lock_release (&free_map_lock);
+
   if (sector != BITMAP_ERROR)
     *sectorp = sector;
+  if (sector == BITMAP_ERROR){
+    int cnt = bitmap_count(free_map, 0, block_size(fs_device), 1);
+    printf("FAILLLL %d %d\n", cnt, block_size(fs_device));
+  }
+  ASSERT(sector < block_size(fs_device));
   return sector != BITMAP_ERROR;
 }
 
@@ -70,8 +69,10 @@ free_map_open (void)
 
 /* Writes the free map to disk and closes the free map file. */
 void
-free_map_close (void) 
+free_map_close (void)
 {
+  if (!bitmap_write (free_map, free_map_file))
+    PANIC ("can't write free map");
   file_close (free_map_file);
 }
 
