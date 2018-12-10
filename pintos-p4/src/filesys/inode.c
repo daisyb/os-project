@@ -153,27 +153,69 @@ block_sector_t inode_get_inumber (const struct inode *inode){
   return inode->sector;
 }
 
+static block_sector_t close_indirect_block (struct indirect_block *indir, block_sector_t remaining){
+  block_sector_t sector = 0;
+  while (remaining > 0 && sector < PTRS_PER_SECTOR){
+    free_map_release (indir->sectors[sector]);
+    remaining--;
+    sector++;
+  }
+  return remaining;
+}
+
+
 /* Closes INODE and writes it to disk.
    If this was the last reference to INODE, frees its memory.
    If INODE was also a removed inode, frees its blocks. */
 void inode_close (struct inode *inode){
-  /* Ignore null pointer. */
   if (inode == NULL)
     return;
-  /* Release resources if this was the last opener. */
   lock_acquire (&open_inodes_lock);
   int open_cnt = --inode->open_cnt;
   lock_release (&open_inodes_lock);
   if (open_cnt == 0){
-    /* Remove from inode list and release lock. */    
     list_remove (&inode->elem);
-    /* Deallocate blocks if removed. */
     if (inode->removed){
-      free_map_release (inode->sector);
-      //TODO write method to free all sectors in inode
-      /* free_map_release (inode->data.start, */
-      /*   		bytes_to_sectors (inode->data.length));  */
-    }
+
+      struct cache_block *b = get_block (inode->sector);
+      struct inode_disk *id = (struct inode_disk *) b->data;
+      block_sector_t remaining = bytes_to_sectors (id->length);
+      
+      block_sector_t sector = 0;
+      while (remaining > 0 && sector < DIRECT_CNT){
+	free_map_release (id->sectors[sector]);
+	remaining--;
+	sector++;
+      }
+      if (remaining == 0) goto done;
+      
+      struct cache_block *b2 = get_block (id->sectors[DIRECT_CNT]);
+      struct indirect_block *indir = (struct indirect_block *) b2->data;
+      remaining = close_indirect_block (indir, remaining);
+      free_map_release (id->sectors[DIRECT_CNT]);
+      cache_block_unlock (b2);
+      if (remaining == 0) goto done;
+
+      sector = 0;
+      b2 = get_block (id->sectors[DIRECT_CNT + INDIRECT_CNT]);
+      struct indirect_block *dbl_indir = (struct indirect_block *) b2->data;
+      struct cache_block *b3;
+      while (remaining > 0 && sector < PTRS_PER_SECTOR){
+        b3 = get_block (dbl_indir->sectors[sector]);
+        indir = (struct indirect_block *) b3->data;
+	remaining = close_indirect_block (indir, remaining);
+	free_map_release (dbl_indir->sectors[sector]);
+	cache_block_unlock (b3);
+	sector++;
+      }
+      free_map_release (id->sectors[DIRECT_CNT + INDIRECT_CNT]);
+      cache_block_unlock (b2);
+      if (remaining == 0) goto done;
+      PANIC ("Could not close inode.");
+      
+    done:
+      cache_block_unlock (b);
+    }    
     free (inode); 
   }
 }
