@@ -338,35 +338,30 @@ extend_file (struct inode *inode, off_t length){
 
   size_t current_idx = bytes_to_sectors(current_length);
   size_t remaining = bytes_to_sectors(length) + 1;
-
   id_block = get_block(inode->sector);
 
   struct inode_disk *id = (struct inode_disk *)id_block->data;
   id->length = length;
 
-  if (current_idx >= remaining)
+  if (remaining <= current_idx)
     goto done;
-
-  int amount_filled = extend_direct(id, current_idx, remaining);
-  remaining -= amount_filled;
-  current_idx += amount_filled;
   
-  if (remaining == 0)
+  current_idx += extend_direct(id, current_idx, remaining);
+
+  if (remaining <= current_idx)
     goto done;
+  
   if (!id->sectors[DIRECT_CNT]){
     block_sector_t sector;
     free_map_allocate(1, &sector);
     id->sectors[DIRECT_CNT] = sector;    
   }
-  
-  indir_block = get_block(id->sectors[DIRECT_CNT]);
-  
+
+  indir_block = get_block(id->sectors[DIRECT_CNT]);  
   struct indirect_block *indir = (struct indirect_block *)indir_block->data;
-  amount_filled = extend_indirect(indir, current_idx - DIRECT_CNT, remaining);
-  remaining -= amount_filled;
-  current_idx += amount_filled;
+  current_idx += extend_indirect(indir, current_idx - DIRECT_CNT, remaining);
   
-  if (remaining == 0)
+  if (remaining <= current_idx)
     goto done;
   
   if (!id->sectors[DIRECT_CNT + INDIRECT_CNT]){
@@ -375,14 +370,13 @@ extend_file (struct inode *inode, off_t length){
     id->sectors[DIRECT_CNT + INDIRECT_CNT] = sector;    
   }
 
-  dbl_block = get_block(id->sectors[DIRECT_CNT + INDIRECT_CNT]);
-  
+  dbl_block = get_block(id->sectors[DIRECT_CNT + INDIRECT_CNT]);  
   struct indirect_block *dbl_indir = (struct indirect_block *)dbl_block->data;
-  amount_filled = extend_dbl(dbl_indir,
+  current_idx += extend_dbl(dbl_indir,
 			     current_idx - (DIRECT_CNT + PTRS_PER_SECTOR),
 			     remaining);
-  remaining -= amount_filled;
-  if (remaining != 0)
+  
+  if (remaining > current_idx)
     success = false;  
 
  done:
