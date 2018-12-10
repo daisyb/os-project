@@ -44,7 +44,7 @@ dir_create (block_sector_t sector, block_sector_t parent_sector)
 
   dir_close(dir);
   if (!success){
-    free_map_release(sector, 1);
+    free_map_release(sector);
     return NULL;
   }
   return inode;  
@@ -240,6 +240,7 @@ dir_remove (struct dir *dir, const char *name)
 
 
   /* Find directory entry. */
+
   inode_lock(dir->inode);
   if (!lookup (dir, name, &e, &ofs))
     goto done;
@@ -260,11 +261,10 @@ dir_remove (struct dir *dir, const char *name)
   e.in_use = false;
   if (inode_write_at (dir->inode, &e, sizeof e, ofs) != sizeof e) 
     goto done;
-
+  
   /* Remove inode. */
   inode_remove (inode);
   success = true;
-
  done:
   inode_unlock(dir->inode);
   inode_close (inode);

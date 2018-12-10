@@ -29,10 +29,12 @@ free_map_init (void)
    Returns true if successful, false if not enough consecutive
    sectors were available or if the free_map file could not be
    written. */
-bool 
+bool
 free_map_allocate (size_t cnt, block_sector_t *sectorp)
 {
+  lock_acquire(&free_map_lock);
    block_sector_t sector = bitmap_scan_and_flip (free_map, 0, cnt, false);
+   lock_release(&free_map_lock);
   if (sector != BITMAP_ERROR
       && free_map_file != NULL
       && !bitmap_write (free_map, free_map_file))
@@ -40,42 +42,21 @@ free_map_allocate (size_t cnt, block_sector_t *sectorp)
       bitmap_set_multiple (free_map, sector, cnt, false);
       sector = BITMAP_ERROR;
     }
+ 
   if (sector != BITMAP_ERROR)
     *sectorp = sector;
   return sector != BITMAP_ERROR;
 }
 
-
-/* Allocates a sector from the free map and stores it into
-   *SECTORP.
-   Returns true if successful, false if not enough consecutive
-   sectors were available or if the free_map file could not be
-  written.  */
-/* bool */
-/* free_map_allocate (size_t cnt, block_sector_t *sectorp) */
-/* { */
-/*   size_t sector; */
-
-/*   lock_acquire (&free_map_lock); */
-/*   sector = bitmap_scan_and_flip (free_map, 0, 1, false); */
-/*   lock_release (&free_map_lock); */
-  
-/*   if (sector != BITMAP_ERROR) */
-/*     *sectorp = sector; */
-/*   return sector != BITMAP_ERROR; */
-/* } */
-
-/* Makes CNT sectors starting at SECTOR available for use. */
+/* Makes SECTOR available for use. */
 void
-free_map_release (block_sector_t sector, size_t cnt)
+free_map_release (block_sector_t sector)
 {
   lock_acquire (&free_map_lock);
-  ASSERT (bitmap_all (free_map, sector, cnt));
-  bitmap_set_multiple (free_map, sector, cnt, false);
-  bitmap_write (free_map, free_map_file);
+  ASSERT (bitmap_test (free_map, sector));
+  bitmap_reset (free_map, sector);
   lock_release (&free_map_lock);
 }
-
 /* Opens the free map file and reads it from disk. */
 void
 free_map_open (void) 

@@ -160,23 +160,20 @@ void inode_close (struct inode *inode){
   /* Ignore null pointer. */
   if (inode == NULL)
     return;
-
   /* Release resources if this was the last opener. */
   lock_acquire (&open_inodes_lock);
   int open_cnt = --inode->open_cnt;
   lock_release (&open_inodes_lock);
   if (open_cnt == 0){
-    /* Remove from inode list and release lock. */
+    /* Remove from inode list and release lock. */    
     list_remove (&inode->elem);
-    
     /* Deallocate blocks if removed. */
     if (inode->removed){
-      free_map_release (inode->sector, 1);
+      free_map_release (inode->sector);
       //TODO write method to free all sectors in inode
       /* free_map_release (inode->data.start, */
       /*   		bytes_to_sectors (inode->data.length));  */
     }
-    
     free (inode); 
   }
 }
