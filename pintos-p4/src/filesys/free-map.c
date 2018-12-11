@@ -39,11 +39,6 @@ free_map_allocate (block_sector_t *sectorp)
 
   if (sector != BITMAP_ERROR)
     *sectorp = sector;
-  /* if (sector == BITMAP_ERROR){ */
-  /*   int cnt = bitmap_count(free_map, 0, block_size(fs_device), 1); */
-  /*   printf("FAILLLL %d %d\n", cnt, block_size(fs_device)); */
-  /* } */
-  //ASSERT(sector < block_size(fs_device));
   return sector != BITMAP_ERROR;
 }
 

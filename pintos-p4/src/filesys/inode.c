@@ -267,9 +267,11 @@ calculate_indices (off_t sector_idx, size_t offsets[], size_t *offset_cnt)
   /* Dbl indirect block */
   offsets[0] = DIRECT_CNT + INDIRECT_CNT;
   /* Indirect block */
+  sector_idx -= DIRECT_CNT;
   offsets[1] = sector_idx / PTRS_PER_SECTOR;
   /* Index into indirect blk */
-  offsets[2] = sector_idx - offsets[1];  
+  sector_idx -= offsets[1] * PTRS_PER_SECTOR;
+  offsets[2] = sector_idx;
 }
 
 /* Retrieves the data block for the given byte OFFSET in INODE,
@@ -288,11 +290,11 @@ get_data_block (struct inode *inode, off_t offset, bool allocate,
   size_t off_cnt;
   size_t offsets[3];
   calculate_indices(offset / BLOCK_SECTOR_SIZE, offsets, &off_cnt);
-  block_sector_t next_sector = inode->sector;
+
   struct cache_block *b; 
   struct indirect_block *indir;
-  unsigned i;
-  for(i = 0; i < off_cnt; i++){
+  block_sector_t next_sector = inode->sector;
+  for(size_t i = 0; i < off_cnt; i++){
     /* Get indirect or inode block */
     b = get_block(next_sector);
     indir = (struct indirect_block *)b->data;
@@ -314,6 +316,7 @@ get_data_block (struct inode *inode, off_t offset, bool allocate,
     next_sector = indir->sectors[sector_idx];
     cache_block_unlock(b);
   }
+
   *data_block = get_block(next_sector);
   return true;
 }
