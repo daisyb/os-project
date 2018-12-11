@@ -294,7 +294,8 @@ get_data_block (struct inode *inode, off_t offset, bool allocate,
   struct cache_block *b; 
   struct indirect_block *indir;
   block_sector_t next_sector = inode->sector;
-  for(size_t i = 0; i < off_cnt; i++){
+  size_t i;
+  for(i = 0; i < off_cnt; i++){
     /* Get indirect or inode block */
     b = get_block(next_sector);
     indir = (struct indirect_block *)b->data;
