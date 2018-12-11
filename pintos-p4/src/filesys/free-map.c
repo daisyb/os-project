@@ -39,11 +39,11 @@ free_map_allocate (block_sector_t *sectorp)
 
   if (sector != BITMAP_ERROR)
     *sectorp = sector;
-  if (sector == BITMAP_ERROR){
-    int cnt = bitmap_count(free_map, 0, block_size(fs_device), 1);
-    printf("FAILLLL %d %d\n", cnt, block_size(fs_device));
-  }
-  ASSERT(sector < block_size(fs_device));
+  /* if (sector == BITMAP_ERROR){ */
+  /*   int cnt = bitmap_count(free_map, 0, block_size(fs_device), 1); */
+  /*   printf("FAILLLL %d %d\n", cnt, block_size(fs_device)); */
+  /* } */
+  //ASSERT(sector < block_size(fs_device));
   return sector != BITMAP_ERROR;
 }
 
@@ -82,12 +82,9 @@ void
 free_map_create (void) 
 {
   /* Create inode. */
-  struct inode *inode;
-  if (!(inode = inode_create (FREE_MAP_SECTOR, FILE_INODE)))
+  struct inode *inode = file_create(FREE_MAP_SECTOR, bitmap_file_size (free_map));
+  if (!inode)
     PANIC ("free map creation failed");
-  int size = bitmap_file_size (free_map);
-  if (!extend_file (inode, size))
-    PANIC ("free map extension failed");
 
   /* Write bitmap to file. */
   free_map_file = file_open (inode);

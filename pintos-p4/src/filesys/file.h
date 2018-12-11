@@ -2,6 +2,7 @@
 #define FILESYS_FILE_H
 
 #include "filesys/off_t.h"
+#include "devices/block.h"
 
 struct inode;
 
@@ -11,6 +12,7 @@ struct file *file_reopen (struct file *);
 void file_close (struct file *);
 struct inode *file_get_inode (struct file *);
 int file_get_inumber (struct file *file);
+struct inode *file_create (block_sector_t sector, off_t length);
 
 /* Reading and writing. */
 off_t file_read (struct file *, void *, off_t);
