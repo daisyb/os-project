@@ -264,6 +264,7 @@ dir_remove (struct dir *dir, const char *name)
   /* Remove inode. */
   inode_remove (inode);
   success = true;
+  
  done:
   inode_unlock(dir->inode);
   inode_close (inode);

@@ -29,13 +29,56 @@ Raphael Hallerman <rhallerman@uchicago.edu>
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
 
+#define INODE_MAGIC 0x494e4f44
+#define DIRECT_CNT 122
+#define INDIRECT_CNT 1
+#define DBL_INDIRECT_CNT 1
+#define SECTOR_CNT (DIRECT_CNT + INDIRECT_CNT + DBL_INDIRECT_CNT)
+#define PTRS_PER_SECTOR ((off_t) (BLOCK_SECTOR_SIZE / sizeof (block_sector_t)))
+#define INODE_SPAN ((DIRECT_CNT
+		     + PTRS_PER_SECTOR * INDIRECT_CNT
+		     + PTRS_PER_SECTOR * PTRS_PER_SECTOR * DBL_INDIRECT_CNT)
+		     * BLOCK_SECTOR_SIZE)
+
+struct inode_disk {
+       ....
+       block_sector_t sectors[SECTOR_CNT];      /* Sectors */
+       ....
+};
+
+struct inode {
+       struct lock lock;			/* Protects the inode */
+       struct lock deny_write_lock;		/* Protects members below */
+       struct condition no_writers_cond;	/* 0: writes ok, >0: deny writes */
+       int writer_cnt;				/* Number of writers */
+};
+
+struct indirect_block {
+       block_sector_t sectors[PTRS_PER_SECTOR];	/* block of direct pointers */
+       unsigned magic;				/* to help identify indirect_blocks */
+};
+
 >> A2: What is the maximum size of a file supported by your inode
 >> structure?  Show your work.
 
+   Our inode_disk structs have 122 direct pointers, and 1 indirect and
+   double-indirect pointer each.
+   Each direct pointer points to a sector = 512 bytes of data, so in total,
+   our direct pointers point to 512 * 122 = 62464 bytes of data.
+   The indirect pointer points to PTRS_PER_SECTOR = 128 direct pointers,
+   and thereby indirectly points to 128 * 512 = 65536 bytes of data.
+   The double-indirect pointer points to 128 indirect pointers, thereby
+   pointing to 16384 direct pointers, and thereby pointing to 16384 * 512
+   = 8388608 bytes of data.
+   In total, then, our inode structure supported files up to size
+   8388608 + 65536 + 62464 = 33682432 bytes = 8516608 bytes = 8.51 megabytes.
+   
 ---- SYNCHRONIZATION ----
 
 >> A3: Explain how your code avoids a race if two processes attempt to
 >> extend a file at the same time.
+
+  
 
 >> A4: Suppose processes A and B both have file F open, both
 >> positioned at end-of-file.  If A reads and B writes F at the same
@@ -44,12 +87,16 @@ Raphael Hallerman <rhallerman@uchicago.edu>
 >> nonzero data, A is not allowed to see all zeros.  Explain how your
 >> code avoids this race.
 
+  
+
 >> A5: Explain how your synchronization design provides "fairness".
 >> File access is "fair" if readers cannot indefinitely block writers
 >> or vice versa.  That is, many processes reading from a file cannot
 >> prevent forever another process from writing the file, and many
 >> processes writing to a file cannot prevent another process forever
 >> from reading the file.
+
+
 
 ---- RATIONALE ----
 
@@ -58,6 +105,14 @@ Raphael Hallerman <rhallerman@uchicago.edu>
 >> indirect blocks?  If not, why did you choose an alternative inode
 >> structure, and what advantages and disadvantages does your
 >> structure have, compared to a multilevel index?
+
+   Our inode structure is a multilevel index, as this seemed like the
+   best way to accomodate the required maximum of 8MB files. We chose
+   this particular combination of direct, indirect, and doubly indirect
+   blocks because it was the minimum number of indirect and doubly
+   indirect blocks required to fulfill the space goal, while still
+   optimizing for small files by having at least one indirect block
+   and as many direct blocks as possible.
 
 			    SUBDIRECTORIES
 			    ==============
@@ -215,6 +270,12 @@ we don't end up evicting a block that is frequently in use.
 
 >> C7: Describe a file workload likely to benefit from buffer caching,
 >> and workloads likely to benefit from read-ahead and write-behind.
+
+   Buffer caching is beneficial for workloads with significant amounts of temporal or spatial locality. These workloads frequently access either the same blocks multiple times or successive blocks within a short time period, so without buffer caching, they'd need to go to disk for each one of these reads/writes.
+
+For temporally local workloads, buffer caching only requires going to disk once, and the program can then continue to read or modify the data within memory. For spatially local workloads, buffer caching reduces the number of disk accesses required to read memory within a single block.
+
+Write-behind is similar, since workloads with temporal locality can continue to write to the same block repeatedly without the cache writing it back to memory until eviction occurs. Read-ahead, on the other hand, optimizes for workloads with spatial locality. These workloads consistently need to access successive blocks, and read-ahead makes the process of reading from disk more efficient by simply bringing multiple blocks into the cache at a time. This way, as long as it is done asynchronously, the workload won't require nearly as many reads from disk.
 
 			   SURVEY QUESTIONS
 			   ================

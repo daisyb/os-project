@@ -75,10 +75,12 @@ static bool
 resolve_name_to_entry (const char *name,
                        struct dir **dirp, char base_name[NAME_MAX + 1])
 {
+  if (!strcmp(name, ""))
+    return false;
 
   struct thread *t = thread_current();
   *dirp = *name == '/'? dir_open_root() : t->working_dir;
-  if (!strcmp(name, "")) return false;
+  
   struct inode *inode = NULL;
   int value;
   while((value = get_next_part(base_name, &name)) && *name != '\0'){
@@ -101,6 +103,8 @@ resolve_name_to_entry (const char *name,
 static struct inode *
 resolve_name_to_inode (const char *name)
 {
+  if (!strcmp (name, ""))
+    return false;
   struct inode *inode = NULL;
   struct dir *dir;
   char base_name[NAME_MAX + 1] = ".";
@@ -133,20 +137,22 @@ filesys_create (const char *name, off_t initial_size, enum inode_type type)
   bool success = (resolve_name_to_entry(name, &dir, base_name) 
                   && dir
                   && free_map_allocate(&inode_sector));
-  if (type == DIR_INODE)
+
+  if (type == DIR_INODE){
     success = success && dir_create(inode_sector, dir_get_inumber(dir));
+  }
   else {
     struct inode *inode = file_create(inode_sector, initial_size);
     success = success && inode;
     inode_close (inode);
   }
-  
   success = success && dir_add(dir, base_name, inode_sector);
 
-  if (!success && inode_sector != 0) 
+  if (!success && inode_sector != 0){
     free_map_release (inode_sector);
-  
-  dir_close (dir);
+  }
+  if (success)
+    dir_close (dir);
   return success;
 }
 

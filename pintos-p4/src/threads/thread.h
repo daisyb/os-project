@@ -115,10 +115,6 @@ struct process {
 
 /* Used to find new file descriptor handles when open() is called */
 int next_fd;
-//struct list available_fd_list;
-
-/* Used to lock the filesystem and prevent conflicts */
-struct lock filesys_lock;
 
 struct thread
   {

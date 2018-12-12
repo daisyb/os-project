@@ -14,7 +14,7 @@
 /* Identifies an inode. */
 #define INODE_MAGIC 0x494e4f44
 
-#define DIRECT_CNT 123
+#define DIRECT_CNT 122
 #define INDIRECT_CNT 1
 #define DBL_INDIRECT_CNT 1
 #define SECTOR_CNT (DIRECT_CNT + INDIRECT_CNT + DBL_INDIRECT_CNT)
@@ -31,6 +31,7 @@ struct inode_disk {
   block_sector_t sectors[SECTOR_CNT]; /* Sectors */
   enum inode_type type;		/* FILE_INODE or DIR_INODE */
   off_t length;			/* File size in bytes */
+  off_t read_length;		/* Readable file size in bytes */
   unsigned magic;			/* Magic number */
 };
 
@@ -82,6 +83,7 @@ struct inode *inode_create (block_sector_t sector, enum inode_type type){
   if (disk_inode != NULL){
     disk_inode->type = type;
     disk_inode->length = 0;
+    disk_inode->read_length = 0;
     disk_inode->magic = INODE_MAGIC;
 
     struct cache_block *b = get_block (sector);
@@ -370,6 +372,7 @@ extend_file (struct inode *inode, off_t length){
   struct cache_block *b = get_block(inode->sector);
   struct inode_disk *id = (struct inode_disk *)b->data;
   if (id->length < length){
+    id->read_length = id->length;
     id->length = length;
     cache_dirty(b);
   }
@@ -386,8 +389,13 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size, off_t offs
   const uint8_t *buffer = buffer_;
   off_t bytes_written = 0;
 
-  if (inode->deny_write_cnt)
+  lock_acquire (&inode->deny_write_lock);
+  if (inode->deny_write_cnt){
+    lock_release (&inode->deny_write_lock);
     return 0;
+  }
+  inode->writer_cnt++;
+  lock_release (&inode->deny_write_lock);
 
   while (size > 0)
     {
@@ -419,6 +427,12 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size, off_t offs
     }
 
   extend_file (inode, offset);
+
+  lock_acquire (&inode->deny_write_lock);
+  if (--inode->writer_cnt == 0)
+    cond_signal (&inode->no_writers_cond, &inode->deny_write_lock);
+  lock_release (&inode->deny_write_lock);
+  
   return bytes_written;
 }
 

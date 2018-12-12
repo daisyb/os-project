@@ -147,26 +147,6 @@ void syscall_init (void){
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
 }
 
-
-/* Write system call */
-int sys_write (int handle, void *usrc_, unsigned size){
-  is_valid_pointer (usrc_);
-  int bytes;    
-  if (handle == STDOUT_FILENO){
-    putbuf (usrc_, size);
-    return size;
-  }
-  lock_acquire (&filesys_lock);
-  struct file_descriptor *fd = lookup_fd(handle);
-  if (!fd || fd->type != FILE_INODE) {
-    lock_release (&filesys_lock);
-    sys_exit (-1);
-  }
-  bytes = file_write (fd->data.file, usrc_, size);
-  lock_release (&filesys_lock);
-  return bytes;
-}
-
 /* Exit system call */
 void sys_exit (int status){
   struct thread *cur = thread_current();
@@ -210,9 +190,7 @@ int sys_create (const char *file, unsigned initial_size){
     return 0;
 
   char *kfile = copy_in_string (file);
-  lock_acquire (&filesys_lock);
   int create_try = filesys_create (kfile, initial_size, FILE_INODE);
-  lock_release (&filesys_lock);
   palloc_free_page (kfile);
   return create_try;
 }
@@ -264,15 +242,12 @@ static inline int  fd_alloc(struct inode* i){
 int sys_open (const char *file){
   is_valid_pointer (file);
   char *kfile = copy_in_string (file);
-  lock_acquire (&filesys_lock);
   struct inode *open_try = filesys_open (kfile);
   if (!open_try){
-    lock_release (&filesys_lock);
     return -1;
   }
   int handle = fd_alloc(open_try);
   palloc_free_page (kfile);
-  lock_release (&filesys_lock);
   return handle;
 }
 
@@ -281,9 +256,7 @@ int sys_open (const char *file){
 void sys_close (int handle){
   if (handle < 2)
     sys_exit (-1); 
-  lock_acquire (&filesys_lock); 
   struct file_descriptor *fd = lookup_fd (handle);
-  lock_release (&filesys_lock);
   if (!fd) return;
   switch(fd->type){
   case FILE_INODE:
@@ -299,14 +272,11 @@ void sys_close (int handle){
 
 /* Filesize system call */
 int sys_filesize (int handle){
-  lock_acquire (&filesys_lock);
   struct file_descriptor *fd = lookup_fd (handle);
   if (!fd || fd->type != FILE_INODE){
-    lock_release (&filesys_lock);
     sys_exit (-1);
   }
   int bytes = file_length (fd->data.file);
-  lock_release (&filesys_lock);
   return bytes;
 }
 
@@ -322,55 +292,58 @@ int sys_read (int handle, void *buffer, unsigned size){
     return size;
   }
 
-  lock_acquire (&filesys_lock);
   struct file_descriptor *fd = lookup_fd (handle);
   if (!fd || fd->type != FILE_INODE){
-    lock_release (&filesys_lock);
     sys_exit (-1);
   }
   int bytes = file_read (fd->data.file, buffer, size);
-  lock_release (&filesys_lock);
+  return bytes;
+}
+
+/* Write system call */
+int sys_write (int handle, void *usrc_, unsigned size){
+  is_valid_pointer (usrc_);
+  int bytes;    
+  if (handle == STDOUT_FILENO){
+    putbuf (usrc_, size);
+    return size;
+  }
+  struct file_descriptor *fd = lookup_fd(handle);
+  if (!fd || fd->type != FILE_INODE) {
+    sys_exit (-1);
+  }
+  bytes = file_write (fd->data.file, usrc_, size);
   return bytes;
 }
 
 /* Tell system call */
 unsigned tell (int handle){
-  lock_acquire (&filesys_lock);
   struct file_descriptor *fd = lookup_fd (handle);
   if (!fd || fd->type != FILE_INODE){
-    lock_release (&filesys_lock);
     sys_exit (-1);
   }
   struct file *f = fd->data.file;
   unsigned bytes = file_tell (f);
-  lock_release (&filesys_lock);
   return bytes;
 }
 
 /* Seek system call */
 void seek (int handle, unsigned position){
-  lock_acquire (&filesys_lock);
   struct file_descriptor *fd = lookup_fd (handle);
   if (!fd || fd->type != FILE_INODE){
-    lock_release (&filesys_lock);
     sys_exit (-1);
   }
   struct file *f = fd->data.file;
   file_seek (f, position);
-  lock_release (&filesys_lock);
 }
 
 bool sys_chdir(const char *dir){
-  lock_acquire(&filesys_lock);
-  int success = filesys_chdir(dir);
-  lock_release(&filesys_lock);
+  bool success = filesys_chdir(dir);
   return success;
 }
 
 bool sys_mkdir(const char *dir){
-  lock_acquire(&filesys_lock);
-  int success = filesys_create(dir, 0, DIR_INODE);
-  lock_release(&filesys_lock);
+  bool success = filesys_create(dir, 0, DIR_INODE);
   return success;
 }
 
